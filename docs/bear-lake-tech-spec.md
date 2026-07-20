@@ -761,36 +761,7 @@ Full coverage is not the goal. These are the areas where bugs will actually occu
 
 ---
 
-## 12. Development sequence
-
-Suggested order. Each phase should be usable before the next begins.
-
-**Phase 1 — Foundation**
-Database schema and migrations, including `User` and `RefreshToken`. Auth: login, refresh with rotation, logout, change-password, `/me`. Role middleware and the `mustChangePassword` gate. `POST /users` and reset-password endpoints. iOS login and forced-change screens.
-
-Seed the first admin account via a migration or a one-off script — there is no way to create the first user through the API, since `POST /users` requires an existing admin. This bootstrap step is easy to forget and blocks everything else.
-
-**Phase 2 — Calendar**
-Events CRUD with range query. iOS calendar month view, day detail, event editor, event detail. This is the feature the family explicitly asked for and the one with the hardest correctness requirements — do it while attention is fresh.
-
-**Phase 3 — Announcements**
-Announcements CRUD. iOS home view and all-announcements view.
-
-**Phase 4 — Knowledge base, read path**
-Categories, articles, quick tips. Block rendering on iOS. Presigned URL resolution. No authoring yet.
-
-**Phase 5 — Web admin**
-The full admin app, including the block editor and user management. This unblocks the father-in-law to begin writing content, and lets accounts be issued to the rest of the family without touching the database directly.
-
-**Phase 6 — iOS authoring**
-Article editor on iOS. Draft toggle, conflict handling.
-
-**Phase 7 — Hardening**
-Orphan image cleanup, error handling review, Dynamic Type and dark mode audit, TestFlight distribution.
-
----
-
-## 13. Open decisions
+## 12. Open decisions
 
 | # | Decision | Blocks | Notes |
 |---|---|---|---|
@@ -809,7 +780,7 @@ Orphan image cleanup, error handling review, Dynamic Type and dark mode audit, T
 
 ---
 
-## 14. Reference
+## 13. Reference
 
 - **`CLAUDE.md`** (repo root) — operational guidance for Claude Code; a condensed form of this document
 - **`design/`** — storyboards for all screens
