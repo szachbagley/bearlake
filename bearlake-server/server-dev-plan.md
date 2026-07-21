@@ -89,6 +89,12 @@ S3_BUCKET=
 
 ---
 
+### Local database
+
+`docker compose up -d` starts MySQL 8.4 as `bearlake-mysql`, published on **port 3308** (3306 and 3307 are taken by other MySQL instances on this machine), with `--default-time-zone=+00:00` so nothing the container writes can drift from the UTC-everywhere rule. Both `bearlake` and `bearlake_test` are created on first start. Data lives in a named volume; `docker compose down -v` erases it.
+
+Production MySQL is provisioned by Railway — the compose file is local development only.
+
 ## 4. Project structure (target)
 
 ```

@@ -1,0 +1,38 @@
+# Local development database only. Production MySQL is provisioned by Railway.
+#
+#   docker compose up -d      start
+#   docker compose down       stop (data survives)
+#   docker compose down -v    stop and erase the data volume
+#
+# Published on 3308: 3306 is taken by a non-Docker mysqld on this machine and
+# 3307 by another project's container. Match the port in .env if you change it.
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: bearlake-mysql
+    restart: unless-stopped
+    ports:
+      - '3308:3306'
+    environment:
+      MYSQL_ROOT_PASSWORD: bearlake-local
+      MYSQL_DATABASE: bearlake
+    command:
+      # UTC everywhere: the server stores all timestamps in UTC and does its
+      # own conversion. A container defaulting to another zone would silently
+      # shift DATETIME values written by CURRENT_TIMESTAMP defaults.
+      - --default-time-zone=+00:00
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    volumes:
+      - bearlake-mysql-data:/var/lib/mysql
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', '127.0.0.1', '-uroot', '-pbearlake-local']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+volumes:
+  bearlake-mysql-data:
