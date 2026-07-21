@@ -17,18 +17,18 @@ export const emailSchema = z
   .max(255)
   .email('must be a valid email address');
 
-export const loginSchema = z.object({
+export const loginSchema = z.strictObject({
   email: emailSchema,
   password: z.string().min(1, 'is required'),
 });
 
-export const refreshSchema = z.object({
+export const refreshSchema = z.strictObject({
   refreshToken: z.string().min(1, 'is required'),
 });
 
 export const logoutSchema = refreshSchema;
 
-export const changePasswordSchema = z.object({
+export const changePasswordSchema = z.strictObject({
   currentPassword: z.string().min(1, 'is required'),
   newPassword: z.string().min(1, 'is required'),
 });

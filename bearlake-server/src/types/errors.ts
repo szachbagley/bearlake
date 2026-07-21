@@ -16,6 +16,7 @@ export const ErrorCode = {
   NOT_FOUND: 'NOT_FOUND',
   STALE_ARTICLE: 'STALE_ARTICLE',
   CATEGORY_NOT_EMPTY: 'CATEGORY_NOT_EMPTY',
+  EMAIL_IN_USE: 'EMAIL_IN_USE',
   RATE_LIMITED: 'RATE_LIMITED',
   PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   INTERNAL: 'INTERNAL',
@@ -88,6 +89,16 @@ export class StaleArticleError extends ApiError {
 export class CategoryNotEmptyError extends ApiError {
   constructor(message = 'Move or delete this category’s articles before deleting it.') {
     super(409, ErrorCode.CATEGORY_NOT_EMPTY, message);
+  }
+}
+
+/**
+ * Only ever returned to an admin creating an account, so it discloses nothing
+ * to an anonymous caller — account enumeration is not a concern on this route.
+ */
+export class EmailInUseError extends ApiError {
+  constructor(message = 'An account with that email address already exists.') {
+    super(409, ErrorCode.EMAIL_IN_USE, message);
   }
 }
 
