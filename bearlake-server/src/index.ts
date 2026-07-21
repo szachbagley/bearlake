@@ -4,6 +4,7 @@ import { runMigrations } from './db/migrate.js';
 import { closePool } from './db/pool.js';
 import { loadEnv } from './lib/loadEnv.js';
 import { logger } from './lib/logger.js';
+import { warmPasswordPolicy } from './services/passwordService.js';
 
 /**
  * Boot sequence: load .env (local only) → validate config → run migrations →
@@ -16,11 +17,19 @@ loadEnv();
 async function main(): Promise<void> {
   const config = getConfig();
 
+  // Fails the boot rather than the first password change if the list is
+  // missing from the build.
+  const commonPasswordCount = warmPasswordPolicy();
+
   await runMigrations();
 
   const app = createApp();
   const server = app.listen(config.port, () => {
-    logger.info('server_started', { port: config.port, env: config.nodeEnv });
+    logger.info('server_started', {
+      port: config.port,
+      env: config.nodeEnv,
+      commonPasswords: commonPasswordCount,
+    });
   });
 
   const shutdown = (signal: string): void => {

@@ -71,6 +71,27 @@ export async function findUserById(id: string): Promise<User | null> {
   return row === undefined ? null : toUser(row);
 }
 
+export async function updateLastLoginAt(id: string, at: string = dbNow()): Promise<void> {
+  await getPool().execute('UPDATE users SET last_login_at = ? WHERE id = ?', [at, id]);
+}
+
+/**
+ * Sets a new password hash and clears the forced-change flag.
+ *
+ * Revoking the user's refresh tokens is the caller's job — it belongs to the
+ * same logical operation but to a different table, and the auth service
+ * sequences both.
+ */
+export async function updatePassword(id: string, passwordHash: string): Promise<void> {
+  const now = dbNow();
+  await getPool().execute(
+    `UPDATE users
+        SET password_hash = ?, must_change_password = 0, updated_at = ?
+      WHERE id = ?`,
+    [passwordHash, now, id],
+  );
+}
+
 /**
  * Email lookup. The caller normalizes to lowercase; the column's
  * utf8mb4_0900_ai_ci collation makes the comparison case-insensitive

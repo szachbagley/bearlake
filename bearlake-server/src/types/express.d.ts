@@ -6,10 +6,17 @@
  * ever sees.
  */
 
+import type { User } from './domain.js';
+
 declare global {
   namespace Express {
     interface Locals {
       userId?: string;
+    }
+
+    interface Request {
+      /** Set by the authenticate middleware; absent on public routes. */
+      user?: User;
     }
   }
 }

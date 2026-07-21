@@ -36,6 +36,19 @@ export default tseslint.config(
     },
   },
   {
+    files: ['test/**/*.ts'],
+    rules: {
+      // supertest types res.body as `any`, so asserting on a response body
+      // trips these on every line. Casting each one adds noise without
+      // catching anything — the assertion below it is the actual check.
+      // Production code under src/ keeps these rules on.
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+    },
+  },
+  {
     files: ['src/lib/logger.ts', 'src/scripts/**/*.ts'],
     rules: {
       // The logger writes the log; the seed script prints the temporary
