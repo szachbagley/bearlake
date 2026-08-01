@@ -86,3 +86,30 @@ export interface EventWrite {
   endsAt: string;
   isAllDay: boolean;
 }
+
+/**
+ * A home-screen announcement. `body` may contain gate codes and passcodes, so
+ * it is treated as sensitive in logs (spec §6.5). `postedAt` is set by the
+ * server at creation and is the displayed date; it is not editable.
+ */
+export interface Announcement {
+  id: string;
+  body: string;
+  postedAt: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * A short reference item on the Information screen — gate codes, where keys
+ * live. Also sensitive in logs. Ordered by `sortOrder`, then creation.
+ */
+export interface QuickTip {
+  id: string;
+  body: string;
+  sortOrder: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
