@@ -71,6 +71,78 @@ export async function findUserById(id: string): Promise<User | null> {
   return row === undefined ? null : toUser(row);
 }
 
+/** Every account, active and deactivated, ordered for display. */
+export async function listUsers(): Promise<User[]> {
+  const [rows] = await getPool().query<RowDataPacket[]>(
+    `SELECT ${COLUMNS} FROM users ORDER BY display_name ASC, created_at ASC`,
+  );
+  return rows.map(toUser);
+}
+
+/**
+ * `| undefined` is explicit because exactOptionalPropertyTypes distinguishes
+ * "absent" from "present and undefined", and callers build this from optional
+ * schema fields.
+ */
+export interface UserUpdate {
+  displayName?: string | undefined;
+  role?: UserRole | undefined;
+  isActive?: boolean | undefined;
+}
+
+/**
+ * Updates the admin-editable fields.
+ *
+ * Email and password are deliberately absent: email is the login identifier
+ * and changing it silently would strand the account, and passwords move only
+ * through the change-password and reset flows. Column names below are literals
+ * chosen by this function, never values from the request.
+ */
+export async function updateUser(id: string, update: UserUpdate): Promise<User | null> {
+  const assignments: string[] = [];
+  const params: (string | number)[] = [];
+
+  if (update.displayName !== undefined) {
+    assignments.push('display_name = ?');
+    params.push(update.displayName);
+  }
+  if (update.role !== undefined) {
+    assignments.push('role = ?');
+    params.push(update.role);
+  }
+  if (update.isActive !== undefined) {
+    assignments.push('is_active = ?');
+    params.push(toDbBoolean(update.isActive));
+  }
+
+  if (assignments.length === 0) {
+    return findUserById(id);
+  }
+
+  assignments.push('updated_at = ?');
+  params.push(dbNow(), id);
+
+  await getPool().execute(`UPDATE users SET ${assignments.join(', ')} WHERE id = ?`, params);
+
+  return findUserById(id);
+}
+
+/**
+ * Sets a new password hash and *forces* a change on next sign-in.
+ *
+ * The mirror image of updatePassword, which clears the flag. Kept as two
+ * functions rather than one with a boolean, because the caller reading
+ * `resetUserPassword` should not have to remember which way the flag goes.
+ */
+export async function resetUserPassword(id: string, passwordHash: string): Promise<void> {
+  await getPool().execute(
+    `UPDATE users
+        SET password_hash = ?, must_change_password = 1, updated_at = ?
+      WHERE id = ?`,
+    [passwordHash, dbNow(), id],
+  );
+}
+
 export async function updateLastLoginAt(id: string, at: string = dbNow()): Promise<void> {
   await getPool().execute('UPDATE users SET last_login_at = ? WHERE id = ?', [at, id]);
 }

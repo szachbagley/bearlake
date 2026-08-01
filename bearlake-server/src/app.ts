@@ -7,6 +7,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { passwordChangeGate } from './middleware/passwordChangeGate.js';
 import { requestLogger } from './middleware/requestLogger.js';
 import { createAuthRouter } from './routes/auth.js';
+import { createUsersRouter } from './routes/users.js';
 import { NotFoundError } from './types/errors.js';
 
 export const API_BASE_PATH = '/api/v1';
@@ -65,7 +66,9 @@ export function createApp(): Express {
   // ─────────────────────────────────────────────────────────────────────────
   api.use(authenticate, passwordChangeGate);
 
-  // Phases 3–7 mount their routers here.
+  api.use('/users', createUsersRouter());
+
+  // Phases 4–7 mount their routers here.
 
   app.use(API_BASE_PATH, api);
 
