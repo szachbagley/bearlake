@@ -55,3 +55,34 @@ export interface NewRefreshToken {
   tokenHash: string;
   expiresAt: string;
 }
+
+/**
+ * An event as the application sees it.
+ *
+ * `startsAt`/`endsAt` carry two different meanings distinguished by `isAllDay`:
+ * for timed events they are ISO-8601 UTC instants; for all-day events they are
+ * date-only strings (`YYYY-MM-DD`), with `endsAt` the last day inclusive
+ * (plan D15). Query modules produce the correct form; nothing above db/ parses
+ * them.
+ */
+export interface Event {
+  id: string;
+  title: string;
+  notes: string | null;
+  startsAt: string;
+  endsAt: string;
+  isAllDay: boolean;
+  createdBy: string;
+  creatorDisplayName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Column values for writing an event. `startsAt`/`endsAt` are in API form. */
+export interface EventWrite {
+  title: string;
+  notes: string | null;
+  startsAt: string;
+  endsAt: string;
+  isAllDay: boolean;
+}
