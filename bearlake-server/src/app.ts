@@ -9,6 +9,7 @@ import { requestLogger } from './middleware/requestLogger.js';
 import { createAnnouncementsRouter } from './routes/announcements.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createEventsRouter } from './routes/events.js';
+import { createInfoRouter } from './routes/info.js';
 import { createQuickTipsRouter } from './routes/quickTips.js';
 import { createUsersRouter } from './routes/users.js';
 import { NotFoundError } from './types/errors.js';
@@ -73,8 +74,9 @@ export function createApp(): Express {
   api.use('/events', createEventsRouter());
   api.use('/announcements', createAnnouncementsRouter());
   api.use('/quick-tips', createQuickTipsRouter());
+  api.use('/info', createInfoRouter());
 
-  // Phases 6–7 mount their routers here.
+  // Phase 7 mounts its router here.
 
   app.use(API_BASE_PATH, api);
 

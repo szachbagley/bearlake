@@ -113,3 +113,63 @@ export interface QuickTip {
   createdAt: string;
   updatedAt: string;
 }
+
+/** A knowledge-base category. */
+export interface InfoCategory {
+  id: string;
+  title: string;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ArticleStatus = 'draft' | 'published';
+
+/**
+ * A content block (spec §4.2). The server knows every block type — it deploys
+ * before the clients — so there is no `unknown` case here; that tolerance lives
+ * in the iOS renderer. Image blocks store the S3 object key; the resolved URL
+ * is added only on the way out (plan D24), never persisted.
+ */
+export type Block =
+  | { id: string; type: 'heading'; text: string }
+  | { id: string; type: 'paragraph'; text: string }
+  | { id: string; type: 'bullets'; items: string[] }
+  | { id: string; type: 'image'; key: string; caption?: string | undefined }
+  | { id: string; type: 'video'; provider: 'youtube'; videoId: string; caption?: string | undefined };
+
+/** An image block as sent to clients: the stored key plus a transient URL. */
+export type ApiBlock = Block | (Extract<Block, { type: 'image' }> & { url: string });
+
+/** The lightweight shape returned by the category article list (plan D22). */
+export interface ArticleSummary {
+  id: string;
+  categoryId: string;
+  title: string;
+  status: ArticleStatus;
+  sortOrder: number;
+  updatedAt: string;
+}
+
+/** A full knowledge-base article, blocks included. */
+export interface InfoArticle {
+  id: string;
+  categoryId: string;
+  title: string;
+  blocks: Block[];
+  schemaVersion: number;
+  status: ArticleStatus;
+  sortOrder: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Column values for writing an article; `blocks` is the validated array. */
+export interface ArticleWrite {
+  categoryId: string;
+  title: string;
+  blocks: Block[];
+  status: ArticleStatus;
+  sortOrder: number;
+}
