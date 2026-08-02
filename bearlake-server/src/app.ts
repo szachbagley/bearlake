@@ -6,8 +6,10 @@ import { authenticate } from './middleware/authenticate.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { passwordChangeGate } from './middleware/passwordChangeGate.js';
 import { requestLogger } from './middleware/requestLogger.js';
+import { createAnnouncementsRouter } from './routes/announcements.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createEventsRouter } from './routes/events.js';
+import { createQuickTipsRouter } from './routes/quickTips.js';
 import { createUsersRouter } from './routes/users.js';
 import { NotFoundError } from './types/errors.js';
 
@@ -69,8 +71,10 @@ export function createApp(): Express {
 
   api.use('/users', createUsersRouter());
   api.use('/events', createEventsRouter());
+  api.use('/announcements', createAnnouncementsRouter());
+  api.use('/quick-tips', createQuickTipsRouter());
 
-  // Phases 5–7 mount their routers here.
+  // Phases 6–7 mount their routers here.
 
   app.use(API_BASE_PATH, api);
 
