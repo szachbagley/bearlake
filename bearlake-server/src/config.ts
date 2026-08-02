@@ -26,6 +26,10 @@ const envSchema = z.object({
     JWT_SECRET: z.string().min(32, 'must be at least 32 characters'),
     ACCESS_TOKEN_TTL_MIN: z.coerce.number().int().positive().default(30),
     REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(60),
+    // bcrypt work factor. Defaults to 12 for real deployments; only the test
+    // environment lowers it, so a suite doing hundreds of hashes stays fast.
+    // A production floor is enforced separately in parseConfig.
+    BCRYPT_COST: z.coerce.number().int().min(4).max(15).default(12),
 
     WEB_ORIGIN: z.string().default(''),
 
@@ -56,6 +60,7 @@ export interface Config {
   database: DatabaseConfig;
   testDatabaseName: string | undefined;
   jwtSecret: string;
+  bcryptCost: number;
   accessTokenTtlMinutes: number;
   refreshTokenTtlDays: number;
   webOrigins: string[];
@@ -104,6 +109,10 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
         problems.push(`  ${key}: required in production`);
       }
     }
+    // The low cost used to speed up tests must never reach production.
+    if (env.BCRYPT_COST !== undefined && Number(env.BCRYPT_COST) < 10) {
+      problems.push('  BCRYPT_COST: must be at least 10 in production');
+    }
   }
 
   if (problems.length > 0) {
@@ -132,6 +141,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): Config {
     database,
     testDatabaseName: e.DB_NAME_TEST,
     jwtSecret: e.JWT_SECRET,
+    bcryptCost: e.BCRYPT_COST,
     accessTokenTtlMinutes: e.ACCESS_TOKEN_TTL_MIN,
     refreshTokenTtlDays: e.REFRESH_TOKEN_TTL_DAYS,
     webOrigins: e.WEB_ORIGIN.split(',')

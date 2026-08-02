@@ -19,6 +19,23 @@ describe('config', () => {
     expect(config.accessTokenTtlMinutes).toBe(30);
     expect(config.refreshTokenTtlDays).toBe(60);
     expect(config.webOrigins).toEqual([]);
+    // Production-strength bcrypt is the default; only the test env lowers it.
+    expect(config.bcryptCost).toBe(12);
+  });
+
+  it('rejects a weak bcrypt cost in production but allows it elsewhere', () => {
+    expect(() => parseConfig({ ...complete, NODE_ENV: 'development', BCRYPT_COST: '4' })).not.toThrow();
+    expect(() =>
+      parseConfig({
+        ...complete,
+        NODE_ENV: 'production',
+        BCRYPT_COST: '4',
+        AWS_ACCESS_KEY_ID: 'k',
+        AWS_SECRET_ACCESS_KEY: 's',
+        S3_REGION: 'us-west-2',
+        S3_BUCKET: 'b',
+      }),
+    ).toThrow(/BCRYPT_COST/);
   });
 
   it('splits and trims the CORS allowlist', () => {

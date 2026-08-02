@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { getConfig } from '../../src/config.js';
 import {
   assertPasswordAllowed,
   generateTemporaryPassword,
@@ -66,10 +67,13 @@ describe('password hashing', () => {
     const first = await hashPassword('the red canoe is behind the shed');
     const second = await hashPassword('the red canoe is behind the shed');
 
-    expect(first).toMatch(/^\$2b\$12\$/);
+    // The cost is whatever the environment configures — 4 under test, 12 in
+    // production; the config test covers the production default separately.
+    const cost = String(getConfig().bcryptCost).padStart(2, '0');
+    expect(first).toMatch(new RegExp(`^\\$2b\\$${cost}\\$`));
     // Distinct salts: identical passwords must not produce identical hashes.
     expect(first).not.toBe(second);
-  }, 20_000);
+  });
 });
 
 describe('temporary passwords', () => {
