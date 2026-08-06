@@ -4,7 +4,9 @@ import { runMigrations } from './db/migrate.js';
 import { closePool } from './db/pool.js';
 import { loadEnv } from './lib/loadEnv.js';
 import { logger } from './lib/logger.js';
+import { setImageUrlResolver } from './services/imageUrlService.js';
 import { warmPasswordPolicy } from './services/passwordService.js';
+import { isS3Configured, s3ImageUrlResolver } from './services/s3Service.js';
 
 /**
  * Boot sequence: load .env (local only) → validate config → run migrations →
@@ -20,6 +22,14 @@ async function main(): Promise<void> {
   // Fails the boot rather than the first password change if the list is
   // missing from the build.
   const commonPasswordCount = warmPasswordPolicy();
+
+  // Use real presigned S3 GETs for article images when S3 is configured
+  // (always in production, per D30a); otherwise the stub resolver stays in
+  // place for local work without a bucket.
+  if (isS3Configured()) {
+    setImageUrlResolver(s3ImageUrlResolver);
+    logger.info('image_urls_resolver', { resolver: 's3' });
+  }
 
   await runMigrations();
 

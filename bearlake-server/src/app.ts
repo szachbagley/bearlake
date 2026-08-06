@@ -11,6 +11,7 @@ import { createAuthRouter } from './routes/auth.js';
 import { createEventsRouter } from './routes/events.js';
 import { createInfoRouter } from './routes/info.js';
 import { createQuickTipsRouter } from './routes/quickTips.js';
+import { createUploadsRouter } from './routes/uploads.js';
 import { createUsersRouter } from './routes/users.js';
 import { NotFoundError } from './types/errors.js';
 
@@ -75,8 +76,7 @@ export function createApp(): Express {
   api.use('/announcements', createAnnouncementsRouter());
   api.use('/quick-tips', createQuickTipsRouter());
   api.use('/info', createInfoRouter());
-
-  // Phase 7 mounts its router here.
+  api.use('/uploads', createUploadsRouter());
 
   app.use(API_BASE_PATH, api);
 

@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import { randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { getConfig } from '../config.js';
 import { ValidationError } from '../types/errors.js';
 
 /**
@@ -10,7 +11,6 @@ import { ValidationError } from '../types/errors.js';
  * message.
  */
 
-const BCRYPT_COST = 12;
 export const MIN_PASSWORD_LENGTH = 12;
 export const MAX_PASSWORD_LENGTH = 128;
 
@@ -87,7 +87,7 @@ export function assertPasswordAllowed(password: string): void {
  * This is inherent to bcrypt and is not worth working around at this scale.
  */
 export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, BCRYPT_COST);
+  return bcrypt.hash(password, getConfig().bcryptCost);
 }
 
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {

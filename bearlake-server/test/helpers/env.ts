@@ -19,6 +19,8 @@ export function applyTestEnv(): void {
     MYSQL_URL: 'mysql://root:bearlake-local@127.0.0.1:3308/bearlake',
     DB_NAME_TEST: 'bearlake_test',
     JWT_SECRET: 'test-secret-that-is-comfortably-long-enough-000',
+    // Fast hashing for the suite; production always uses the default of 12.
+    BCRYPT_COST: '4',
     WEB_ORIGIN: 'http://localhost:5173',
     AWS_ACCESS_KEY_ID: 'test-access-key-id',
     AWS_SECRET_ACCESS_KEY: 'test-secret-access-key',
@@ -26,7 +28,15 @@ export function applyTestEnv(): void {
     S3_BUCKET: 'bearlake-media-test',
   };
 
+  // Treat an empty value as unset. `.env` is copied from `.env.example`, whose
+  // AWS_*/S3_* lines are present but blank; a plain `??=` would keep those empty
+  // strings (empty is not null/undefined) and leave S3 unconfigured under test.
+  // A real, non-empty value in `.env` still wins, so a developer can point the
+  // suite at a real test bucket.
   for (const [key, value] of Object.entries(defaults)) {
-    process.env[key] ??= value;
+    const current = process.env[key];
+    if (current === undefined || current === '') {
+      process.env[key] = value;
+    }
   }
 }
