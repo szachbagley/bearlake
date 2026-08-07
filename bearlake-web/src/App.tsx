@@ -1,13 +1,63 @@
+import { createBrowserRouter, Navigate, RouterProvider } from 'react-router-dom';
+import { ApiClientProvider, apiClient } from './api/context.tsx';
+import { AuthProvider } from './auth/AuthProvider.tsx';
+import { ChangePasswordPage } from './auth/ChangePasswordPage.tsx';
+import { LoginPage } from './auth/LoginPage.tsx';
+import { RequireAdmin } from './auth/RequireAdmin.tsx';
+import { ComingSoon } from './components/ComingSoon.tsx';
+import { Layout } from './components/Layout.tsx';
+import { NotFoundPage } from './components/NotFoundPage.tsx';
+import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx';
+
 /**
- * Placeholder application shell (Phase 0). Replaced by the router and layout
- * in Phase 3; this exists so the boot sequence in main.tsx has something real
- * to mount and verify against a running API.
+ * The router (plan W2, step 1). `/login` and `/change-password` sit outside
+ * the guarded layout since they must be reachable while signed out or mid
+ * password-change; every other screen is a child of the `RequireAdmin`-wrapped
+ * `Layout` route, so the gate applies uniformly and the nav only ever renders
+ * once an admin session is fully established.
+ *
+ * Feature routes render `ComingSoon` until their own phase (§6) ships the
+ * real screen — this phase wires routing and the shell, not the features.
  */
+const router = createBrowserRouter([
+  {
+    path: '/login',
+    element: <LoginPage />,
+    errorElement: <RouteErrorBoundary />,
+  },
+  {
+    path: '/change-password',
+    element: <ChangePasswordPage />,
+    errorElement: <RouteErrorBoundary />,
+  },
+  {
+    path: '/',
+    element: (
+      <RequireAdmin>
+        <Layout />
+      </RequireAdmin>
+    ),
+    errorElement: <RouteErrorBoundary />,
+    children: [
+      { index: true, element: <Navigate to="/announcements" replace /> },
+      { path: 'announcements', element: <ComingSoon title="Announcements" /> },
+      { path: 'quick-tips', element: <ComingSoon title="Quick tips" /> },
+      { path: 'calendar', element: <ComingSoon title="Calendar" /> },
+      { path: 'knowledge', element: <ComingSoon title="Knowledge base" /> },
+      { path: 'knowledge/categories/:id', element: <ComingSoon title="Category" /> },
+      { path: 'knowledge/articles/:id', element: <ComingSoon title="Article" /> },
+      { path: 'users', element: <ComingSoon title="Users" /> },
+      { path: '*', element: <NotFoundPage /> },
+    ],
+  },
+]);
+
 export default function App() {
   return (
-    <main className="stack" style={{ padding: 'var(--space-6)' }}>
-      <h1>Bear Lake Admin</h1>
-      <p className="text-muted">Scaffold in progress.</p>
-    </main>
+    <ApiClientProvider client={apiClient}>
+      <AuthProvider>
+        <RouterProvider router={router} />
+      </AuthProvider>
+    </ApiClientProvider>
   );
 }
