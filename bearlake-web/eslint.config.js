@@ -90,14 +90,24 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/api/context.tsx'],
+    files: ['test/setup.ts'],
     rules: {
-      // The plan's project structure (§4) colocates the Provider, its hook,
-      // and the real-client export in one small file — the standard React
-      // Context pattern. react-refresh/only-export-components is a Fast
-      // Refresh nicety (preserving component state across hot reload), not
-      // a correctness rule; splitting one Context into three files to
-      // satisfy it isn't worth the fragmentation.
+      // This is the file that enforces the localStorage ban everywhere else
+      // (plan W27) — it spies on window.localStorage specifically in order
+      // to assert it's never called, which requires referencing it.
+      'no-restricted-globals': 'off',
+      'no-restricted-properties': 'off',
+    },
+  },
+  {
+    files: ['src/api/context.tsx', 'src/auth/AuthProvider.tsx'],
+    rules: {
+      // The plan's project structure (§4) colocates each Provider with its
+      // hook in one file — the standard React Context pattern.
+      // react-refresh/only-export-components is a Fast Refresh nicety
+      // (preserving component state across hot reload), not a correctness
+      // rule; splitting one Context into multiple files to satisfy it isn't
+      // worth the fragmentation.
       'react-refresh/only-export-components': 'off',
     },
   },
