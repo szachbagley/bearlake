@@ -8,6 +8,8 @@ import { ComingSoon } from './components/ComingSoon.tsx';
 import { Layout } from './components/Layout.tsx';
 import { NotFoundPage } from './components/NotFoundPage.tsx';
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx';
+import { AnnouncementsPage } from './features/announcements/AnnouncementsPage.tsx';
+import { QuickTipsPage } from './features/quickTips/QuickTipsPage.tsx';
 
 /**
  * The router (plan W2, step 1). `/login` and `/change-password` sit outside
@@ -16,8 +18,8 @@ import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx';
  * `Layout` route, so the gate applies uniformly and the nav only ever renders
  * once an admin session is fully established.
  *
- * Feature routes render `ComingSoon` until their own phase (§6) ships the
- * real screen — this phase wires routing and the shell, not the features.
+ * Feature routes not yet built render `ComingSoon` until their own phase
+ * (§6) ships the real screen.
  */
 const router = createBrowserRouter([
   {
@@ -40,8 +42,8 @@ const router = createBrowserRouter([
     errorElement: <RouteErrorBoundary />,
     children: [
       { index: true, element: <Navigate to="/announcements" replace /> },
-      { path: 'announcements', element: <ComingSoon title="Announcements" /> },
-      { path: 'quick-tips', element: <ComingSoon title="Quick tips" /> },
+      { path: 'announcements', element: <AnnouncementsPage /> },
+      { path: 'quick-tips', element: <QuickTipsPage /> },
       { path: 'calendar', element: <ComingSoon title="Calendar" /> },
       { path: 'knowledge', element: <ComingSoon title="Knowledge base" /> },
       { path: 'knowledge/categories/:id', element: <ComingSoon title="Category" /> },
