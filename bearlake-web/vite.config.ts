@@ -26,6 +26,13 @@ export default defineConfig(({ mode }) => {
       setupFiles: ['test/setup.ts'],
       globals: false,
       include: ['test/**/*.test.{ts,tsx}', 'src/**/*.test.{ts,tsx}'],
+      // Deterministic regardless of whether a developer's .env.local exists:
+      // Vite would otherwise load it too (it's not mode-specific), so the
+      // suite would pass locally but fail on a fresh clone or in CI with no
+      // .env.local present. Explicit here is what makes it portable.
+      env: {
+        VITE_API_BASE_URL: '/api/v1',
+      },
     },
   };
 });

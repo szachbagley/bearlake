@@ -89,4 +89,16 @@ export default tseslint.config(
       '@typescript-eslint/no-unsafe-call': 'off',
     },
   },
+  {
+    files: ['src/api/context.tsx'],
+    rules: {
+      // The plan's project structure (§4) colocates the Provider, its hook,
+      // and the real-client export in one small file — the standard React
+      // Context pattern. react-refresh/only-export-components is a Fast
+      // Refresh nicety (preserving component state across hot reload), not
+      // a correctness rule; splitting one Context into three files to
+      // satisfy it isn't worth the fragmentation.
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 );
