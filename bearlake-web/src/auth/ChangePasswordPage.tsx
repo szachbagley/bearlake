@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ApiError } from '../api/client.ts';
 import { useAuth } from './AuthProvider.tsx';
 
@@ -12,6 +13,7 @@ const MIN_PASSWORD_LENGTH = 12;
  */
 export function ChangePasswordPage() {
   const { user, changePassword } = useAuth();
+  const navigate = useNavigate();
   const forced = user?.mustChangePassword === true;
 
   const [currentPassword, setCurrentPassword] = useState('');
@@ -52,9 +54,10 @@ export function ChangePasswordPage() {
       <main className="stack" style={{ maxWidth: '20rem', margin: '4rem auto' }}>
         <h1>Password changed</h1>
         <p className="success-banner">Your password has been changed.</p>
-        {/* No router yet (Phase 3) — history is the simplest way back that
-         * does not assume a specific prior route. */}
-        <button type="button" className="btn" onClick={() => window.history.back()}>
+        {/* navigate(-1), not a fixed route: this page is reachable from
+         * anywhere in the guarded layout, and going back to wherever the
+         * admin came from is simpler than assuming one. */}
+        <button type="button" className="btn" onClick={() => void navigate(-1)}>
           Done
         </button>
       </main>
@@ -116,7 +119,7 @@ export function ChangePasswordPage() {
             {submitting ? 'Changing…' : 'Change password'}
           </button>
           {!forced && (
-            <button type="button" className="btn btn--ghost" onClick={() => window.history.back()}>
+            <button type="button" className="btn btn--ghost" onClick={() => void navigate(-1)}>
               Cancel
             </button>
           )}
