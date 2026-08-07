@@ -13,7 +13,12 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "migrate": "tsx src/db/migrate.ts",
-    "seed:admin": "tsx src/scripts/seedAdmin.ts"
+    "seed:admin": "tsx src/scripts/seedAdmin.ts",
+    "migrate:prod": "node dist/db/migrate.js",
+    "seed:admin:prod": "node dist/scripts/seedAdmin.js"
+  },
+  "engines": {
+    "node": ">=20"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1090.0",

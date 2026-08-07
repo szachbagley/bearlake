@@ -365,3 +365,44 @@ Applied at every phase gate (step 4 of §5):
 - Phases are strictly ordered; each commit leaves the suite green.
 - Anything discovered mid-build that contradicts this plan → stop, amend §2 with the new decision and rationale, then continue. The plan stays truthful to what was built.
 - Client-facing implications recorded for the iOS/web plans: D9 (client retains current password in memory for the forced change), D15 (all-day date-only wire format, inclusive end), D25 (create draft article before first image upload), D18 (cursor pagination contract).
+
+---
+
+## 9. Phase 8 results — hardening, review, deployment
+
+Completed 2026-08-07. Server is deployed and live; client work may begin.
+
+### Security sweep (all verified)
+
+- [x] **No string-concatenated SQL.** Every `${…}` in `db/queries/` is a constant column-list or clause fragment (`COLUMNS`, `SELECT`, `order`, `statusClause`); all values pass as `?` placeholders. The only value interpolations are inside thrown `Error` messages (server-side logs), never SQL.
+- [x] **Route authorization matches the spec table.** Every mutating route on an admin-only resource carries `requireAdmin`; events create/read are any-member with creator-or-admin enforced in the service; `/me` and change-password are gate-exempt; all other routes sit behind `authenticate` + `passwordChangeGate`. No `POST /auth/register` (test asserts it 404s and creates no user).
+- [x] **No `console.*` outside `lib/logger.ts`.** Verified by grep; the logger never records request/response bodies (leakage tests re-run green).
+- [x] **`.env` never committed** (`git log --all -- .env` empty); `.env.example` current, including `BCRYPT_COST`.
+- [x] **Errors never leak internals.** `test/unit/errorHandler.test.ts` forces a simulated driver error (with `.code`/`.sql`) and a `TypeError`; the client receives only `{ error: { code: "INTERNAL", … } }` with no SQL, driver code, or stack — the detail is logged server-side only.
+- [x] **`.env`-free boot fails fast.** `NODE_ENV=production` with no vars lists every missing variable (JWT, MySQL, all four S3) in one pass and exits non-zero.
+
+### Test coverage vs. spec §11 (232 tests)
+
+| # | Priority | Covered by |
+|---|---|---|
+| 1 | Date/timezone: all-day, multi-day, month/DST boundaries, cross-timezone | `unit/dateRange.test.ts`, `unit/mapper.test.ts` (DST round-trips), `events.test.ts` (all-day, both 2026 DST transitions, midnight/month spans, offset-independent placement) |
+| 2 | Authorization: member can't edit others' events, reach admin resources, or read drafts | `events.test.ts` (ownership, 404-before-403), `users.test.ts`, `info.test.ts` (draft gating both roles), `announcements.test.ts`, `quickTips.test.ts` |
+| 3 | Event range query returns overlaps starting before / ending after the window | `events.test.ts` (half-open overlap, boundary exclusion) |
+| 4 | Calendar selection rules | **Client-side (iOS)** — not a server concern |
+| 5 | Block round-trip is structurally identical | `info.test.ts` (all five block types, parsed comparison, no url persisted) |
+| 6 | Renderer tolerates unknown block types | **Client-side (iOS renderer).** Server-side counterpart: unknown block type → 400 (`info.test.ts`) |
+| 7 | Auth: no user without an admin; `mustChangePassword` blocks all else; deactivated refresh dies; rotation revokes prior; reuse revokes the family | `auth.test.ts`, `users.test.ts`, `scripts/seedAdmin.test.ts` |
+| 8 | Credential leakage: temp passwords in exactly one response, never logged | `users.test.ts`, `auth.test.ts`, `logging.test.ts`, `announcements.test.ts`, `quickTips.test.ts` |
+
+Priorities 4 and 6 are client responsibilities; the server covers its side of 6 (strict rejection of unknown blocks) and has no role in 4.
+
+### Deployment
+
+- [x] Railway project `bearlake-cabin`: MySQL 9.4 (private) + Node service `bearlake-server`, deployed via `railway up` from the subdirectory; `railway.json` sets build/start and the `/api/v1/health` healthcheck; Node pinned to 22.
+- [x] Env vars set (secrets via stdin, never a command line): `NODE_ENV`, `JWT_SECRET`, `MYSQL_URL=${{MySQL.MYSQL_URL}}`, `S3_REGION`, `S3_BUCKET`, `AWS_*`.
+- [x] S3 `bearlake-media-prod` (us-east-1): Block Public Access on, SSE-S3, CORS GET/PUT/HEAD; scoped IAM user `bearlake-server` (PutObject/GetObject on `articles/*` only — not root keys).
+- [x] Boot migrations ran; first admin seeded through a temporary MySQL TCP proxy (removed afterward).
+- [x] Production smoke test passed end-to-end, including **D42** — the real presigned PUT/GET round-trip against `bearlake-media-prod`. Transcript: `docs/deploy-smoke-2026-08-07.md`.
+- [x] Tagged `server-v1`.
+
+**D42 is closed** (see §2): the live-bucket verification deferred from Phase 7 is complete.
