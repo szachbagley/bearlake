@@ -42,6 +42,14 @@ export interface ApiClientAuth {
    * recurse — plan W28 treats a failed refresh as final, never retried.
    */
   refreshAccessToken: () => Promise<string | null>;
+  /**
+   * Called on any 403 PASSWORD_CHANGE_REQUIRED, from any call (plan step 7).
+   * The server checks `mustChangePassword` fresh on every request, which can
+   * disagree with the client's last-known user object — this lets
+   * AuthProvider update its own state so the gate applies immediately,
+   * rather than leaving a raw error on whatever page happened to hit it.
+   */
+  onPasswordChangeRequired?: () => void;
 }
 
 let auth: ApiClientAuth | null = null;
@@ -163,7 +171,11 @@ async function performRequest<T>(
   }
 
   if (!response.ok) {
-    throw await toApiError(response);
+    const apiError = await toApiError(response);
+    if (apiError.code === 'PASSWORD_CHANGE_REQUIRED') {
+      auth?.onPasswordChangeRequired?.();
+    }
+    throw apiError;
   }
 
   // Response.json() is typed `any` by lib.dom; this is the one place that
