@@ -9,6 +9,7 @@ import { Layout } from './components/Layout.tsx';
 import { NotFoundPage } from './components/NotFoundPage.tsx';
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx';
 import { AnnouncementsPage } from './features/announcements/AnnouncementsPage.tsx';
+import { CalendarPage } from './features/calendar/CalendarPage.tsx';
 import { QuickTipsPage } from './features/quickTips/QuickTipsPage.tsx';
 import { UsersPage } from './features/users/UsersPage.tsx';
 
@@ -45,7 +46,7 @@ const router = createBrowserRouter([
       { index: true, element: <Navigate to="/announcements" replace /> },
       { path: 'announcements', element: <AnnouncementsPage /> },
       { path: 'quick-tips', element: <QuickTipsPage /> },
-      { path: 'calendar', element: <ComingSoon title="Calendar" /> },
+      { path: 'calendar', element: <CalendarPage /> },
       { path: 'knowledge', element: <ComingSoon title="Knowledge base" /> },
       { path: 'knowledge/categories/:id', element: <ComingSoon title="Category" /> },
       { path: 'knowledge/articles/:id', element: <ComingSoon title="Article" /> },

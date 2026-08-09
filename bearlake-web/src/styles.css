@@ -352,3 +352,97 @@ button {
     transform: rotate(360deg);
   }
 }
+
+/* ── Calendar ───────────────────────────────────────────────────────────── */
+
+.month-grid {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.month-grid-header,
+.month-grid-body {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+
+.month-grid-weekday {
+  padding: var(--space-2);
+  text-align: center;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.month-grid-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-1);
+  min-height: 5.5rem;
+  padding: var(--space-2);
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.month-grid-cell:hover {
+  background: var(--color-surface);
+}
+
+.month-grid-cell--selected {
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.month-grid-cell--outside {
+  color: var(--color-text-muted);
+  background: var(--color-surface);
+}
+
+.month-grid-day-number {
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.month-grid-day-number--today {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+}
+
+.month-grid-pill {
+  width: 100%;
+  padding: 1px var(--space-1);
+  border-radius: 4px;
+  background: var(--color-surface);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.month-grid-pill--all-day {
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+}
+
+.day-detail-empty,
+.day-detail-event {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}
