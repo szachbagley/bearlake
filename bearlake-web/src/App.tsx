@@ -4,11 +4,11 @@ import { AuthProvider } from './auth/AuthProvider.tsx';
 import { ChangePasswordPage } from './auth/ChangePasswordPage.tsx';
 import { LoginPage } from './auth/LoginPage.tsx';
 import { RequireAdmin } from './auth/RequireAdmin.tsx';
-import { ComingSoon } from './components/ComingSoon.tsx';
 import { Layout } from './components/Layout.tsx';
 import { NotFoundPage } from './components/NotFoundPage.tsx';
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx';
 import { AnnouncementsPage } from './features/announcements/AnnouncementsPage.tsx';
+import { ArticleEditorPage } from './features/articles/ArticleEditorPage.tsx';
 import { CategoriesPage } from './features/articles/CategoriesPage.tsx';
 import { CategoryPage } from './features/articles/CategoryPage.tsx';
 import { CalendarPage } from './features/calendar/CalendarPage.tsx';
@@ -22,8 +22,6 @@ import { UsersPage } from './features/users/UsersPage.tsx';
  * `Layout` route, so the gate applies uniformly and the nav only ever renders
  * once an admin session is fully established.
  *
- * Feature routes not yet built render `ComingSoon` until their own phase
- * (§6) ships the real screen.
  */
 const router = createBrowserRouter([
   {
@@ -51,7 +49,7 @@ const router = createBrowserRouter([
       { path: 'calendar', element: <CalendarPage /> },
       { path: 'knowledge', element: <CategoriesPage /> },
       { path: 'knowledge/categories/:id', element: <CategoryPage /> },
-      { path: 'knowledge/articles/:id', element: <ComingSoon title="Article" /> },
+      { path: 'knowledge/articles/:id', element: <ArticleEditorPage /> },
       { path: 'users', element: <UsersPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
