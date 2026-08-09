@@ -17,3 +17,33 @@ export function formatInstant(iso: string): string {
     timeStyle: 'short',
   }).format(new Date(iso));
 }
+
+const RELATIVE_UNITS: { unit: Intl.RelativeTimeFormatUnit; ms: number }[] = [
+  { unit: 'year', ms: 365 * 24 * 60 * 60 * 1000 },
+  { unit: 'month', ms: 30 * 24 * 60 * 60 * 1000 },
+  { unit: 'week', ms: 7 * 24 * 60 * 60 * 1000 },
+  { unit: 'day', ms: 24 * 60 * 60 * 1000 },
+  { unit: 'hour', ms: 60 * 60 * 1000 },
+  { unit: 'minute', ms: 60 * 1000 },
+];
+
+/**
+ * "3 days ago" / "in 2 hours" (plan Phase 5 step 1: users' last-login column
+ * shows relative time, with the absolute instant on hover via `formatInstant`
+ * in a `title` attribute). `now` is injectable so tests can pin it instead of
+ * racing the real clock.
+ */
+export function formatRelativeTime(iso: string, now: Date = new Date()): string {
+  const diffMs = new Date(iso).getTime() - now.getTime();
+  const absMs = Math.abs(diffMs);
+
+  if (absMs < 60_000) return 'just now';
+
+  const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+  for (const { unit, ms } of RELATIVE_UNITS) {
+    if (absMs >= ms) {
+      return formatter.format(Math.round(diffMs / ms), unit);
+    }
+  }
+  return 'just now';
+}

@@ -10,6 +10,7 @@ import { NotFoundPage } from './components/NotFoundPage.tsx';
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx';
 import { AnnouncementsPage } from './features/announcements/AnnouncementsPage.tsx';
 import { QuickTipsPage } from './features/quickTips/QuickTipsPage.tsx';
+import { UsersPage } from './features/users/UsersPage.tsx';
 
 /**
  * The router (plan W2, step 1). `/login` and `/change-password` sit outside
@@ -48,7 +49,7 @@ const router = createBrowserRouter([
       { path: 'knowledge', element: <ComingSoon title="Knowledge base" /> },
       { path: 'knowledge/categories/:id', element: <ComingSoon title="Category" /> },
       { path: 'knowledge/articles/:id', element: <ComingSoon title="Article" /> },
-      { path: 'users', element: <ComingSoon title="Users" /> },
+      { path: 'users', element: <UsersPage /> },
       { path: '*', element: <NotFoundPage /> },
     ],
   },
