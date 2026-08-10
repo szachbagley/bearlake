@@ -91,9 +91,10 @@ These follow from the server as built. Getting them wrong produces 400s that loo
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
 | W33 | API base URL | `VITE_API_BASE_URL`, validated at startup by a tiny config module that throws a visible error page if missing/malformed. **Dev** uses a Vite proxy (`/api` → `http://localhost:3000`) so local development has no CORS involvement at all. | One place resolves the API origin. The dev proxy removes a whole class of "works locally, breaks deployed" confusion. |
-| W34 | Hosting | **Separate Railway static service** serving the Vite build (SPA fallback to `index.html`), not served from the Express app. Closes spec open decision #3. | `CLAUDE.md`: "the three apps are independent," each built and deployed separately. Serving the SPA from Express would couple their deploys and add a route the API does not otherwise need. |
-| W35 | CORS | Deploying the web app requires setting **`WEB_ORIGIN`** on the API service to the web app's domain (comma-separated allowlist; currently unset, so browsers are blocked today). This is a **server env change, not a code change**, performed in Phase 9. | The API's CORS allowlist is already implemented and reads this variable. Recorded here because it is the one cross-app step. |
-| W36 | Build-time secrets | **None.** Vite inlines every `VITE_*` variable into public JavaScript; only the API base URL is ever exposed. No AWS keys, no JWT secret, no database URL in this app, ever. | A `VITE_`-prefixed secret is a published secret. Called out because it is an easy and unrecoverable mistake. |
+| W34 | Hosting | **Vercel**, as its own project separate from the API: root directory `bearlake-web`, build `npm run build`, output `dist/`, with a checked-in `vercel.json` rewriting all paths to `index.html` so deep links work. Not served from the Express app, and **not on Railway** (superseded; see W34a). Closes spec open decision #3. | `CLAUDE.md`: "the three apps are independent," each built and deployed separately. Serving the SPA from Express would couple their deploys and add a route the API does not otherwise need. |
+| W34a | Why Vercel over Railway | Amended after Phase 8. Vercel is the zero-config path for a Vite SPA (framework detection, static CDN, SPA fallback); Railway would mean running a static file server for a bundle of files, configured by hand, for no benefit this app can use. The author already deploys UI on Vercel and APIs on Railway. | Accepted costs, both small and both recorded here so they are not surprises: a second dashboard/billing surface alongside the API's Railway project, and preview deployments that cannot reach the API (W35). |
+| W35 | CORS | Deploying the web app requires setting **`WEB_ORIGIN`** on the **API service (Railway)** to the web app's **Vercel production domain** (comma-separated allowlist; currently unset, so browsers are blocked today). A **server env change, not a code change**, performed in Phase 9. The API matches origins **exactly** — `config.webOrigins.includes(origin)` in `bearlake-server/src/app.ts`, no wildcard support — so every Vercel **preview** deployment, which gets its own generated URL, would be refused by the API. v1 therefore **turns Git preview deployments off** for this project: a preview that can only render the login screen is worse than no preview, because it looks broken. | The API's CORS allowlist is already implemented and reads this variable. Recorded here because it is the one cross-app step, and because exact-match origins are precisely what makes per-branch preview URLs a non-starter without adding each one by hand. Reversible: if a preview is ever genuinely needed, add that specific URL to `WEB_ORIGIN` and redeploy the API. |
+| W36 | Build-time secrets | **None.** Vite inlines every `VITE_*` variable into public JavaScript; only the API base URL is ever exposed, set as a Production-scoped environment variable in the Vercel project. No AWS keys, no JWT secret, no database URL in this app, ever. | A `VITE_`-prefixed secret is a published secret. Called out because it is an easy and unrecoverable mistake — and Vercel's env UI makes adding one frictionless, which is exactly the hazard. |
 
 ---
 
@@ -109,7 +110,8 @@ VITE_API_BASE_URL=/api/v1
 # Dev-only: where the Vite proxy forwards /api requests.
 VITE_DEV_API_PROXY=http://localhost:3000
 
-# Production example (set in Railway, not committed):
+# Production example (set in the Vercel project's env settings, not committed).
+# The value points at the API, which is deployed on Railway:
 # VITE_API_BASE_URL=https://bearlake-server-production.up.railway.app/api/v1
 ```
 
@@ -122,7 +124,7 @@ No other variables. See W36.
 ```
 bearlake-web/
   package.json  tsconfig.json  vite.config.ts  eslint.config.js
-  .env.example  .node-version  index.html  railway.json
+  .env.example  .node-version  index.html  vercel.json
   src/
     main.tsx            — entry, router, providers
     config.ts           — VITE_* validation (W33)
@@ -337,11 +339,17 @@ The centerpiece. Everything else exists to support this screen.
    - Every mutating request body matches its documented field set exactly (W11).
    - Every destructive action is confirmed first.
    - `.env.local` never committed; `.env.example` current.
+   - **S3 bucket CORS** on `bearlake-media-prod` is currently `AllowedOrigins: ["*"]`, which is why the browser→S3 PUT (W24) worked from `localhost` during Phase 8 and why the move to a Vercel domain will not break it. This is **not** an access-control hole — the bucket has Block Public Access on and every read and write requires a presigned URL, so the signature is what authorizes, not the origin. Narrow it anyway to the Vercel production origin plus `http://localhost:5173`: it costs one command and removes a needless allowance.
 3. Run the full suite; append a coverage table mapping tests to this plan's risk areas (dates, auth/session, block round-trip, credential handling, concurrency).
 4. Accessibility pass: every input labeled; modals trap and restore focus; the block list is fully keyboard-operable; visible focus rings; `aria-live` for save/upload status. Verified by keyboard-only navigation in the browser check.
 5. Production build check: `npm run build` then `npm run preview` against the deployed API; confirm no console errors and a reasonable bundle size.
-6. **Deployment (Railway, W34):** new static service in the existing `bearlake-cabin` project, root directory `bearlake-web`, build `npm run build`, SPA fallback to `index.html`; set `VITE_API_BASE_URL` to the deployed API.
-7. **Set `WEB_ORIGIN`** on the API service to the web app's domain and redeploy it (W35) — without this, every browser request is blocked by CORS.
+6. **Deployment (Vercel, W34):**
+   - Add a checked-in `vercel.json` with a catch-all rewrite to `/index.html`, so a deep link like `/knowledge/articles/:id` is served the SPA rather than a 404. Do not rely on framework auto-detection for this — it is one file and it makes the behavior explicit and reviewable.
+   - New Vercel project pointing at this repo, **root directory `bearlake-web`** (the repo holds three independent apps; without this Vercel builds the wrong thing).
+   - Pin the Node version the way Vercel actually reads it — add `engines.node` to `package.json` rather than assuming `.node-version` is honored — and confirm the build log reports Node 22. W10 currently claims `engines` is already set; it is not, so this closes that drift too.
+   - Set `VITE_API_BASE_URL` (Production scope) to the deployed API's `/api/v1` URL.
+   - **Turn off Git preview deployments** (W35): they cannot reach the API, so they would only ever render the login screen.
+7. **Set `WEB_ORIGIN`** on the **API service in Railway** to the Vercel production domain, and redeploy the API (W35) — without this, every browser request is blocked by CORS. Verify from the deployed web app, not with `curl`: CORS is enforced by browsers, so a passing `curl` proves nothing here.
 8. Production smoke test against the deployed pair: admin login → forced-change gate (if applicable) → create/edit/delete one of each resource → article with a real uploaded image → user create + temp password modal → sign out. Clean up test data. Save the transcript to `docs/`.
 9. Tag `web-v1`.
 
@@ -380,9 +388,10 @@ Flagged per the request; these change how the work gets verified, not what gets 
 **Use situationally:**
 
 - **`/simplify`** — after Phase 8, when the editor's block components have accumulated and duplication is easiest to see.
-- **Railway CLI agent tooling** — running `railway setup agent` installs Railway's skills and MCP server (deployments, logs, status, docs). The CLI itself surfaced this suggestion during the server deploy; it would make Phase 9 deployment and any log-reading materially easier than raw CLI parsing.
+- **Vercel CLI** — Phase 9 only, for the web app's own deploy: `vercel link`, `vercel env`, `vercel deploy --prod`, and build logs. The dashboard is fine too; the CLI is just faster to drive and leaves a transcript.
+- **Railway CLI agent tooling** — still relevant after W34, because the **API** stays on Railway: Phase 9 sets `WEB_ORIGIN` and redeploys it there. Running `railway setup agent` installs Railway's skills and MCP server (deployments, logs, status, docs), which makes that step and any log-reading easier than raw CLI parsing.
 - **`fewer-permission-prompts`** — worth running once early if permission prompts on `npm`/`vite` commands become a drag.
-- **AWS CLI** (already authenticated) — only needed in Phase 8/9 to clean up test S3 objects and, if the browser upload is blocked, to inspect the bucket's CORS configuration.
+- **AWS CLI** (already authenticated) — needed in Phase 8/9 to clean up test S3 objects, to inspect the bucket's CORS configuration if a browser upload is blocked, and to narrow that CORS rule in the Phase 9 security sweep.
 
 **Explicitly not applicable:** `dataviz` (no charts in this app), `artifact-design`/`artifact-diagramming` (those govern Claude Artifacts, not a deployed React app — reaching for them here would be a category error).
 
