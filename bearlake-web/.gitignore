@@ -1,7 +1,15 @@
 node_modules/
 dist/
-.env
-.env.local
 *.local
 *.log
 .DS_Store
+
+# Vercel CLI project link + the OIDC token it writes into .env.local.
+.vercel
+
+# Local env files. `.env.example` is the checked-in template and must stay
+# committable — the Vercel CLI appends a blanket `.env*` here when it links a
+# project, which would swallow it, so these are listed explicitly instead.
+.env
+.env.local
+!.env.example

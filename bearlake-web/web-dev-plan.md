@@ -355,6 +355,9 @@ The centerpiece. Everything else exists to support this screen.
 
 **Gate:** all of the above recorded as checked in this file, suite green, smoke transcript committed.
 
+**Status: complete (2026-08-10).** Results recorded in §10; smoke transcript at
+`docs/web-deploy-smoke-2026-08-10.md`. Live at <https://bearlake-web.vercel.app>.
+
 ---
 
 ## 7. Per-phase review checklist
@@ -406,3 +409,51 @@ Flagged per the request; these change how the work gets verified, not what gets 
 - Anything discovered mid-build that contradicts this plan → stop, amend §2 with the new decision and its rationale, then continue. The plan stays truthful to what was built.
 - The API is authoritative and already deployed. If the web app needs a capability the API lacks, that is a **server change first** (and a server plan amendment) — never a special-cased client workaround, and never an endpoint that exists only for the web app.
 - Cross-app implications to carry into the **iOS** plan: the block schema mirror (W5) is the same contract Swift models must match; W15's date-only wire format and W16's `updatedAt` concurrency apply identically there.
+
+---
+
+## 10. Phase 9 verification record
+
+Completed 2026-08-10. Production smoke transcript: `docs/web-deploy-smoke-2026-08-10.md`.
+
+### Security sweep (Phase 9 step 2)
+
+| Check | Result |
+|---|---|
+| No `localStorage` anywhere | **Pass.** Only two mentions in `src/`, both comments stating it is *not* used. Confirmed live in production: `localStorage.length === 0`. |
+| Access token never persisted or rendered | **Pass.** Memory-only module variable; `sessionStorage` holds exactly one key, `bearlake.refreshToken`. |
+| No `console.*` outside a logging module | **Pass.** Zero `console.*` calls in `src/` — the planned logging module was never needed. |
+| No `VITE_` var other than the API base URL | **Fixed, then pass.** `getConfig()` passed the whole `import.meta.env` object, which Vite cannot statically replace, so it emitted **every** `VITE_*` — shipping `VITE_DEV_API_PROXY` into the production bundle. Now reads the single property; `dist/` greps clean. |
+| `dist/` free of `AWS`, `SECRET`, JWT, bucket name, DB URL | **Pass.** 0 hits for each. |
+| Mutating bodies match documented fields (W11) | **Pass.** All 21 call sites reviewed; every body is an exact literal or a typed `Create*`/`Update*` request. TypeScript's exact request types plus the server's `z.strictObject` make an extra key a compile error. |
+| Every destructive action confirmed first | **Pass.** Every file issuing a delete/reset/deactivate also mounts `ConfirmDialog`; 9 feature files in total. |
+| `.env.local` never committed; `.env.example` current | **Fixed, then pass.** `vercel link` appended a blanket `.env*` to `.gitignore`, which would have made the checked-in `.env.example` un-addable. Replaced with explicit entries plus `!.env.example`. The `VERCEL_OIDC_TOKEN` the CLI wrote lives only in gitignored `.env.local`. |
+| S3 bucket CORS | **Narrowed.** Was `AllowedOrigins: ["*"]`; now the three Vercel aliases plus `localhost:5173/4173`. Not an access-control hole either way (private bucket, presigned-only), but the allowance was needless. Validated by a real upload after narrowing. |
+
+### Accessibility pass (Phase 9 step 4)
+
+| Check | Result |
+|---|---|
+| Every input labeled | **Fixed, then pass.** All controls use `id` + `<label htmlFor>` or a wrapping `<label>`, except the hidden file input in `AddBlockMenu`, which was an anonymous control in the a11y tree. Given `aria-label` and `tabIndex={-1}` so the "+ Photo" button is the single keyboard stop. |
+| Modals trap and restore focus | **Pass.** Covered by `Modal` tests since Phase 3 (focus trap, Escape, focus restoration to trigger). |
+| Block list keyboard-operable | **Pass.** Move up/down/delete are real `<button>`s with `aria-label`s; no drag-and-drop (W20). |
+| Visible focus rings | **Pass.** `:focus-visible` outline on inputs, textareas, selects, buttons, links. |
+| `aria-live` for save/upload status | **Fixed, then pass.** Upload had `role="status"`; **save had no announcement at all** — the only success cue was the "Unsaved changes" indicator disappearing, invisible to a screen-reader user. Added a polite live region announcing "Article saved.", with a regression test. |
+
+### Test coverage against this plan's risk areas (Phase 9 step 3)
+
+251 tests across 32 files, all passing.
+
+| Risk area | Where it is covered |
+|---|---|
+| Dates / timezones | `test/utils/dates.test.ts` — both 2026 DST transitions; all-day round-trips asserted invariant at UTC+13, UTC−11, `America/Denver`, UTC; month-grid enumeration; `getEventsFetchWindow` inside the 366-day cap. `EventFormModal.test.tsx` — DST-correct UTC serialization, all-day toggle rewriting the payload shape. |
+| Auth / session | `test/auth/*` — login stores tokens, failed login stores nothing, member rejected *and* logged out, `mustChangePassword` gate blocks navigation, boot restore both ways, and a suite-wide spy asserting `localStorage` is never written. |
+| Block round-trip | `blocks.test.ts` — unknown block preserved field-for-field, malformed known block rejected rather than reclassified. `ArticleEditorPage.test.tsx` — unknown block round-trips byte-identical through an unrelated edit and save. |
+| Credential handling | `UsersPage.test.tsx` — temp password shown once, cleared on dismiss, copied exactly, and explicitly asserted absent from `sessionStorage`, `localStorage`, the URL, and `console`. Re-verified live in production (smoke step 18). |
+| Concurrency | `ArticleEditorPage.test.tsx` — 409 `STALE_ARTICLE` shows the reload/copy prompt, never silently overwrites; Reload refetches; "Copy my changes" copies the local blocks JSON then reloads. |
+| Image pipeline | `upload.test.ts` — disallowed type and oversize rejected *before* any presign call; presigned `Content-Length` equals bytes actually PUT. `image.test.ts` — downscale math, HEIC passthrough. No write payload contains `url` (asserted in the editor tests). |
+| YouTube parsing | `youtube.test.ts` — all four URL shapes, bare id, whitespace, and junk rejection. |
+
+### Deviation from Phase 9 step 6
+
+Git integration was **not** connected; deploys are CLI-driven (`vercel deploy --prod` from `bearlake-web/`). This satisfies W35 by construction — with no Git connection there are no preview URLs for the API's exact-match CORS to refuse. Trade-off: merging to `master` does not auto-deploy. Connecting Git later is a dashboard toggle, at which point previews must be disabled per W35.

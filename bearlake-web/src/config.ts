@@ -36,9 +36,18 @@ export function parseConfig(env: { VITE_API_BASE_URL?: string }): AppConfig {
 
 let cached: AppConfig | undefined;
 
-/** The validated config, resolved once from Vite's env and cached. */
+/**
+ * The validated config, resolved once from Vite's env and cached.
+ *
+ * Reads the **single property**, not `import.meta.env` as a whole. Vite
+ * statically replaces `import.meta.env.VITE_FOO` with a literal, but a
+ * reference to the bare object forces it to emit the entire env — which
+ * shipped the dev-only `VITE_DEV_API_PROXY` into the production bundle
+ * until the Phase 9 sweep caught it. Passing one property is what actually
+ * makes W36's "only the API base URL is ever exposed" true.
+ */
 export function getConfig(): AppConfig {
-  cached ??= parseConfig(import.meta.env);
+  cached ??= parseConfig({ VITE_API_BASE_URL: import.meta.env.VITE_API_BASE_URL });
   return cached;
 }
 
