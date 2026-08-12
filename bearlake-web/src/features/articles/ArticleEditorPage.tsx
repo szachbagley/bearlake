@@ -54,6 +54,10 @@ export function ArticleEditorPage() {
 
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<unknown>(null);
+  /** Announced politely to screen readers (plan Phase 9 step 4). The visible
+   * cue for a successful save is the "Unsaved changes" indicator
+   * disappearing, which is invisible to a non-sighted user. */
+  const [saveStatus, setSaveStatus] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const [staleConflict, setStaleConflict] = useState(false);
 
@@ -146,6 +150,9 @@ export function ArticleEditorPage() {
     if (id === undefined || !dirty) return;
     setValidationError(null);
     setSaveError(null);
+    // Cleared so a second save of the same article re-announces rather than
+    // leaving an unchanged live region that screen readers ignore.
+    setSaveStatus('');
 
     const trimmedTitle = title.trim();
     if (trimmedTitle.length < ARTICLE_TITLE_MIN || trimmedTitle.length > ARTICLE_TITLE_MAX) {
@@ -173,6 +180,7 @@ export function ArticleEditorPage() {
       };
       const result = await api.updateArticle(id, patch);
       applyArticle(result);
+      setSaveStatus('Article saved.');
     } catch (err) {
       if (err instanceof ApiError && err.code === 'STALE_ARTICLE') {
         setStaleConflict(true);
@@ -231,6 +239,9 @@ export function ArticleEditorPage() {
 
   return (
     <div className="stack">
+      <div aria-live="polite" className="sr-only">
+        {saveStatus}
+      </div>
       <div className="row row--between">
         <Link to="/knowledge">← Knowledge base</Link>
         {dirty && <span className="text-muted">Unsaved changes</span>}

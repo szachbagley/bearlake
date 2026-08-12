@@ -41,9 +41,15 @@ export function AddBlockMenu({
       <button type="button" className="btn" disabled={disabled} onClick={() => onAdd('video')}>
         + Video
       </button>
+      {/* The "+ Photo" button above is the real control; this input is only
+       * the mechanism it drives. Labelled so it is not an anonymous control
+       * in the a11y tree, and taken out of the tab order so keyboard users
+       * get one stop for "add a photo", not two. */}
       <input
         ref={fileInputRef}
         type="file"
+        aria-label="Choose a photo to upload"
+        tabIndex={-1}
         accept={ALLOWED_UPLOAD_CONTENT_TYPES.join(',')}
         className="sr-only"
         onChange={(e) => {

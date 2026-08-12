@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -100,10 +100,19 @@ describe('ArticleEditorPage — adding blocks', () => {
     await user.click(screen.getByRole('button', { name: '+ Bullet list' }));
     await user.click(screen.getByRole('button', { name: '+ Video' }));
 
-    await user.type(screen.getByLabelText('Heading'), 'Section one');
-    await user.type(screen.getByLabelText('Paragraph'), 'Take the second exit.');
-    await user.type(screen.getByLabelText('Bullet 1'), 'Pack sunscreen');
-    await user.type(screen.getByLabelText('YouTube URL or video id'), 'dQw4w9WgXcQ');
+    // fireEvent.change, not user.type: this test asserts the *payload shape*
+    // produced by adding one of each block, not keystroke handling. Typing
+    // these four strings character-by-character is ~80 controlled-input
+    // re-renders, which pushed the test past the default timeout whenever the
+    // full suite ran under load — flaky for no added coverage.
+    fireEvent.change(screen.getByLabelText('Heading'), { target: { value: 'Section one' } });
+    fireEvent.change(screen.getByLabelText('Paragraph'), {
+      target: { value: 'Take the second exit.' },
+    });
+    fireEvent.change(screen.getByLabelText('Bullet 1'), { target: { value: 'Pack sunscreen' } });
+    fireEvent.change(screen.getByLabelText('YouTube URL or video id'), {
+      target: { value: 'dQw4w9WgXcQ' },
+    });
 
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -370,6 +379,42 @@ describe('ArticleEditorPage — stale article conflict (409)', () => {
     await waitFor(() => expect(screen.getByLabelText('Title')).toHaveValue('Someone else changed this'));
 
     vi.unstubAllGlobals();
+  });
+});
+
+describe('ArticleEditorPage — accessibility', () => {
+  it('announces a successful save in a polite live region', async () => {
+    const updateArticle = vi.fn().mockResolvedValue(article({ title: 'Renamed' }));
+    const client = createFakeApiClient({
+      getArticle: () => Promise.resolve(article()),
+      listCategories: () => Promise.resolve({ categories: [category()] }),
+      updateArticle,
+    });
+    const user = userEvent.setup();
+
+    renderEditor(client);
+    await waitFor(() => expect(screen.getByLabelText('Title')).toHaveValue('Driving directions'));
+
+    // The only visible success cue is the "Unsaved changes" indicator
+    // disappearing, which a screen reader user never perceives.
+    await user.type(screen.getByLabelText('Title'), '!');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Article saved.')).toBeInTheDocument();
+  });
+
+  it('labels the hidden file input and keeps it out of the tab order', async () => {
+    const client = createFakeApiClient({
+      getArticle: () => Promise.resolve(article()),
+      listCategories: () => Promise.resolve({ categories: [category()] }),
+    });
+
+    renderEditor(client);
+    await waitFor(() => expect(screen.getByLabelText('Title')).toHaveValue('Driving directions'));
+
+    const fileInput = screen.getByLabelText('Choose a photo to upload');
+    expect(fileInput).toHaveAttribute('type', 'file');
+    expect(fileInput).toHaveAttribute('tabindex', '-1');
   });
 });
 
