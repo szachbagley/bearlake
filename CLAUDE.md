@@ -20,6 +20,16 @@ bearlake/
 
 `design/` is reference material, not build input. Read the storyboards there when a screen's behavior is unclear; never modify them.
 
+**Each app has a dev plan that closes its open decisions. Read the relevant one before writing code in that app** — it is more specific than this file and, where they differ, it wins:
+
+| App | Plan | Status |
+|---|---|---|
+| `bearlake-server/` | `server-dev-plan.md` | Complete, deployed on Railway, tagged `server-v1` |
+| `bearlake-web/` | `web-dev-plan.md` | Complete, deployed on Vercel, tagged `web-v1` |
+| `bearlake-client/` | `client-dev-plan.md` | Written; build not started |
+
+`bearlake-web/` is the reference implementation of the API contract for both clients — its request/response types are already verified against the running server. Read them rather than re-deriving from the server source.
+
 Work in one app at a time. When a change spans several (e.g. adding a field to an event), update `bearlake-server/` first, then the clients. Run commands from the relevant subdirectory, not the repo root.
 
 **The web app is a client, not a privileged path.** It uses the same `/api/v1` endpoints, the same validation, and the same authorization checks as iOS. Never add a server capability that exists only for the web app.
@@ -29,8 +39,10 @@ Work in one app at a time. When a change spans several (e.g. adding a field to a
 ## Platform & stack
 
 ### iOS client
-- **Minimum deployment: iOS 17.** Use `@Observable`, SwiftData, and `NavigationStack`. Do not generate Combine-heavy code, `ObservableObject`/`@Published`, or `NavigationView`.
-- Swift 5.9+, SwiftUI only. No UIKit, no XIBs, no storyboard files.
+- **Minimum deployment: iOS 17.** Use `@Observable`, SwiftData, and `NavigationStack`. Do not generate Combine-heavy code, `ObservableObject`/`@Published`, or `NavigationView`. The Xcode template shipped `IPHONEOS_DEPLOYMENT_TARGET = 26.0`; it is corrected to 17.0 in client plan Phase 0. Anything above 17 excludes family members on older phones.
+- Swift, SwiftUI only. No XIBs, no storyboard files. **Swift 5 language mode** (not Swift 6 strict concurrency) — enforce isolation by hand with `@MainActor` on ViewModels and `actor` for shared mutable state.
+- **No UIKit, with exactly one sanctioned exception:** a `WKWebView` wrapped in `UIViewRepresentable` for the YouTube embed in article video blocks. iOS 17 has no SwiftUI-native web view and YouTube cannot play through `AVPlayer`. Confine it to that one file; any other UIKit interop needs discussion first.
+- **Testing: Swift Testing** (`import Testing`, `@Test`, `#expect`). No XCUITest bundle — UI verification is a scripted simulator run at each phase gate.
 - **Architecture: MVVM.** Views are SwiftUI structs; ViewModels are `@Observable` classes.
 - **Persistence: SwiftData** — used as a local cache of server state, not as the source of truth. The API is authoritative.
 - **Networking:** `URLSession` with async/await. No Alamofire or other third-party HTTP clients.
@@ -140,7 +152,9 @@ client stores the returned key in the image block
 
 - Server enforces a content-type allowlist (JPEG, PNG, HEIC) and a size cap.
 - Keys are namespaced: `articles/{articleId}/{uuid}`.
-- Clients downscale before upload. An unmodified iPhone photo is 3–5 MB and nothing in this app needs that resolution.
+- Clients downscale before upload. An unmodified iPhone photo is 3–5 MB and nothing in this app needs that resolution. Max 2000 px on the long edge, JPEG q0.85. The web app must upload HEIC untouched (`<canvas>` cannot decode it); **iOS re-encodes everything to JPEG**, since it decodes HEIC natively and is the client that mostly produces it.
+- The presigned PUT signs **both** `Content-Type` and `Content-Length`, so the declared byte count must be the bytes actually sent — post-downscale, not the original. A mismatch is rejected by S3, not by us.
+- **Cache fetched images by their S3 `key`, never by the presigned URL.** URLs rotate on every read and expire in 15 minutes, so a URL-keyed cache never hits and grows without bound.
 - Images uploaded but never referenced by a saved block will accumulate. Orphan cleanup is a known deferred task — do not build it without asking, but do not pretend it isn't needed.
 
 **Video — YouTube, unlisted.** No transcoding, no storage cost, no bandwidth cost, and playback works everywhere. Unlisted videos are not searchable but are viewable by anyone with the link, which is the right tradeoff for cabin instructions. Do not put video in S3.
@@ -154,6 +168,9 @@ This is the single largest source of bugs in a calendar app. Rules:
 - Never do date math with `TimeInterval` arithmetic (`+ 86400`). Use `Calendar` with explicit `DateComponents`.
 - Never use `Calendar.current` inside a ViewModel without injecting it — tests need to pin the calendar and timezone.
 - Day-boundary logic (which day an event "belongs to" in the month grid) belongs in one shared utility, not duplicated per view.
+- **In Swift, an all-day date stays a `String` end to end.** Decode, store, compare (lexicographically), and format `YYYY-MM-DD` without ever building a `Date` from it. `ISO8601DateFormatter` reads a bare date as UTC midnight, which renders a day early for every negative-offset viewer — including Utah.
+- **An all-day `endsAt` is the last day, inclusive.** Jul 16–20 is `"2026-07-16"`…`"2026-07-20"` and reads as *through Jul 20*, not *until*.
+- **Configure `ISO8601DateFormatter` with `[.withInternetDateTime, .withFractionalSeconds]`.** The API emits `…T00:00:00.000Z`; without the fractional-seconds option the parse returns `nil` and looks like missing data rather than a decode failure.
 
 ---
 
@@ -318,19 +335,23 @@ SwiftData caches server responses for offline viewing. The server is the source 
 
 ### Suggested structure
 ```
-bearlake-client/BearLake/
-  App/            — @main App struct, root tab view
+bearlake-client/bearlake-client/     — the synchronized group; everything here compiles
+  App/            — @main App struct, root tab view, settings sheet
   Features/
-    Home/         — HomeView, HomeViewModel
+    Home/         — HomeView, AllAnnouncementsView + ViewModels
     Calendar/     — CalendarMonthView, DayDetailView, EventEditorView, EventDetailView + ViewModels
     Information/  — InformationView, CategoryView, ArticleView,
-                    ArticleEditorView, block views + ViewModels
+                    ArticleEditorView, Blocks/ + ViewModels
     Auth/         — LoginView, ChangePasswordView, AuthViewModel
-  Models/         — SwiftData @Model types, API DTOs
-  Services/       — APIClient, AuthService, KeychainStore
-  Utilities/      — date helpers, formatters
-  Tests/
+  Models/         — API DTOs, Block enum, Cache/ (SwiftData @Model types)
+  Services/       — BearLakeAPI protocol, APIClient, TokenStore, KeychainStore,
+                    ImageCache, ImageUpload
+  Utilities/      — CabinDate (all date logic), YouTube, AppConfig
+bearlake-client/bearlake-clientTests/ — Swift Testing target (separate target)
 ```
+
+The folder is `bearlake-client/bearlake-client/`, not `BearLake/` — renaming it would
+break the synchronized group's path for no benefit.
 
 ---
 
@@ -385,11 +406,17 @@ bearlake-web/src/
 
 ```bash
 # iOS — from bearlake/bearlake-client/
-xcodebuild build -scheme BearLake \
-  -destination 'platform=iOS Simulator,name=iPhone 16' -quiet
-xcodebuild test -scheme BearLake \
-  -destination 'platform=iOS Simulator,name=iPhone 16' -quiet 2>&1 | tail -30
+# One-time setup: xcode-select points at CommandLineTools by default, so
+# xcodebuild/simctl do not work until this is run (needs sudo, user runs it):
+#   sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+# An iOS simulator runtime may also need downloading: xcodebuild -downloadPlatform iOS
+
+# Pick a real device name first — do NOT guess one; a wrong name fails every build:
 xcrun simctl list devices available
+SIM='platform=iOS Simulator,name=<device from the list above>'
+
+xcodebuild build -scheme bearlake-client -destination "$SIM" -quiet
+xcodebuild test  -scheme bearlake-client -destination "$SIM" -quiet 2>&1 | tail -30
 
 # API — from bearlake/bearlake-server/
 npm run dev
@@ -411,7 +438,8 @@ There is no root-level package manifest and no workspace tooling — the three a
 
 ## Working agreements
 
-- **New Swift files do not auto-add to the Xcode target.** The project in `bearlake-client/` was initialized by Xcode, so `project.pbxproj` is authoritative and hand-managed. After creating a Swift file, say so explicitly so it can be added in Xcode. Do not edit `project.pbxproj` directly.
+- **New Swift files auto-add to the Xcode target.** The app target uses a `PBXFileSystemSynchronizedRootGroup` over the inner `bearlake-client/bearlake-client/` folder, so any `.swift` file created anywhere beneath it is compiled automatically — no Xcode GUI step. Create files freely from the CLI. (Evidence: the `PBXSourcesBuildPhase` file list is empty and no Swift file is referenced individually, yet the target builds.)
+- **Never edit `project.pbxproj` directly.** It is now generated rather than curated, so hand edits are both unnecessary and likely to be clobbered. The two things it cannot do for you are creating a **new target** and changing **build settings** — both are Xcode GUI operations. Adding a test target is the one such step in the client plan (Phase 0).
 - Ask before adding any dependency, in any of the three apps.
 - Ask before changing the database schema, the API contract, the block schema, or the auth model.
 - **Changing the block schema is a three-app task.** Server validation, React editor, iOS editor, iOS renderer, and `schemaVersion` all move together. Do not ship a partial change.
@@ -427,7 +455,7 @@ Full coverage isn't the goal; these areas are where bugs will actually bite:
 2. Authorization — that a member genuinely cannot edit another member's event or any admin-only resource, and cannot retrieve drafts, tested at the API level
 3. The event range query returning correct results for events that start before or end after the requested window
 4. Calendar selection rules (month change → first of month; year change → corresponding date)
-5. Block round-tripping — an article written in the web editor, opened and saved in the iOS editor, must be byte-identical if untouched, including any block type the iOS editor doesn't recognize
+5. Block round-tripping — an article written in the web editor, opened and saved in the iOS editor, must be unchanged if untouched, including any block type the iOS editor doesn't recognize. **Compare parsed structures, not raw JSON strings** — Swift and TypeScript order keys differently, so a byte comparison fails for purely cosmetic reasons (spec §11)
 6. Renderer tolerance — an article containing an unknown block type renders without crashing
 7. Authentication — that no endpoint creates a user without an admin caller; that `mustChangePassword` blocks every other route; that a deactivated user's existing refresh token stops working; that refresh rotation revokes the prior token and reusing a revoked one revokes the whole family
 8. Credential leakage — temporary passwords appear in exactly one response and in no log output
