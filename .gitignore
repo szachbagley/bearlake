@@ -1,0 +1,4 @@
+# Repo-wide. Each app also has its own .gitignore for build output specific
+# to its toolchain (bearlake-server/, bearlake-web/, bearlake-client/).
+
+.DS_Store

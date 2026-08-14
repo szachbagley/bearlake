@@ -1,0 +1,21 @@
+# Xcode build output
+build/
+DerivedData/
+*.xcuserstate
+
+# Per-developer Xcode state: window layout, breakpoints, and which schemes
+# are visible. Three of these were committed by the initial Xcode template
+# and are untracked in Phase 0 — they are why `git status` showed a dirty
+# tree throughout the server and web builds.
+#
+# Note this deliberately does NOT ignore xcshareddata/. If a scheme is marked
+# "Shared" in Xcode it belongs in the repo, so that `-scheme bearlake-client`
+# resolves in a fresh clone instead of relying on Xcode autocreating it.
+xcuserdata/
+*.xcuserdatad/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+.DS_Store
