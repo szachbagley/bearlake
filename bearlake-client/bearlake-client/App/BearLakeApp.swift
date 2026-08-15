@@ -16,10 +16,6 @@ struct BearLakeApp: App {
 
 /// Phase 0 placeholder. Replaced in Phase 2 by the real root switch
 /// (login vs. tab shell) once auth exists.
-///
-/// The `BuildProbe` reference is deliberate: the probe lives in a folder
-/// that was never registered in `project.pbxproj`, so this line only
-/// compiles if the synchronized group really does auto-add files (C5).
 struct PlaceholderView: View {
     var body: some View {
         VStack(spacing: 12) {
@@ -28,9 +24,6 @@ struct PlaceholderView: View {
                 .foregroundStyle(.tint)
             Text("Bear Lake")
                 .font(.title)
-            Text(BuildProbe.confirmation)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
         .padding()
     }
