@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  C13: DEBUG builds talk to http://localhost:3000. ATS blocks cleartext
+	  HTTP by default; NSAllowsLocalNetworking carves out loopback and local
+	  hostnames without the blanket NSAllowsArbitraryLoads, so release traffic
+	  to the Railway API stays fully protected.
+
+	  This file intentionally contains ONLY this key. GENERATE_INFOPLIST_FILE
+	  stays YES, and Xcode merges its INFOPLIST_KEY_* build settings (scene
+	  manifest, launch screen, supported orientations) into this file at build
+	  time. See the Phase 0 notes in client-dev-plan.md — the merge is
+	  unverified until the toolchain works, and there is a documented fallback
+	  if this Xcode version does not honour it.
+	-->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>

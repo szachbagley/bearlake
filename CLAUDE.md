@@ -406,17 +406,20 @@ bearlake-web/src/
 
 ```bash
 # iOS — from bearlake/bearlake-client/
-# One-time setup: xcode-select points at CommandLineTools by default, so
-# xcodebuild/simctl do not work until this is run (needs sudo, user runs it):
+# Toolchain is configured (Xcode 26.0.1). If xcodebuild/simctl ever stop
+# resolving, xcode-select has reverted to CommandLineTools; re-run:
 #   sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-# An iOS simulator runtime may also need downloading: xcodebuild -downloadPlatform iOS
 
-# Pick a real device name first — do NOT guess one; a wrong name fails every build:
-xcrun simctl list devices available
-SIM='platform=iOS Simulator,name=<device from the list above>'
+SIM='platform=iOS Simulator,name=iPhone 17'   # verified installed; re-check with
+                                              # xcrun simctl list devices available
 
 xcodebuild build -scheme bearlake-client -destination "$SIM" -quiet
 xcodebuild test  -scheme bearlake-client -destination "$SIM" -quiet 2>&1 | tail -30
+
+# Run it and grab a screenshot (the per-phase gate):
+xcrun simctl boot "iPhone 17"; xcrun simctl install "iPhone 17" <path/to.app>
+xcrun simctl launch "iPhone 17" hansen.bearlake-client
+xcrun simctl io "iPhone 17" screenshot shot.png
 
 # API — from bearlake/bearlake-server/
 npm run dev

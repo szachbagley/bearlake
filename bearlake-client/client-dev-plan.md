@@ -26,11 +26,11 @@ Every open or unspecified choice, resolved. Final for v1. Referenced as **C1…C
 
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
-| C1 | Deployment target | **iOS 17.0.** The Xcode template set `IPHONEOS_DEPLOYMENT_TARGET = 26.0`; change it in Phase 0. | `CLAUDE.md` and spec §7.1 both specify iOS 17. Shipping at 26.0 would silently exclude family members whose phones are a year or two old — the exact opposite of this app's purpose. iOS 17 still gives `@Observable`, SwiftData, `NavigationStack`, and `PhotosPicker`. |
+| C1 | Deployment target | **iOS 17.0.** The Xcode template set `IPHONEOS_DEPLOYMENT_TARGET = 26.0`; ✅ **corrected in Phase 0** — the built bundle now reports `MinimumOSVersion 17.0`. (The project-level default and the test target sit at 17.6; harmless, see the Phase 0 status note.) | `CLAUDE.md` and spec §7.1 both specify iOS 17. Shipping at 26.0 would silently exclude family members whose phones are a year or two old — the exact opposite of this app's purpose. iOS 17 still gives `@Observable`, SwiftData, `NavigationStack`, and `PhotosPicker`. |
 | C2 | Swift language mode | **Swift 5 mode** (`SWIFT_VERSION = 5.0`, as set). Enforce concurrency by hand: `@MainActor` on ViewModels, `actor` for shared mutable state. | Swift 6 strict concurrency across SwiftData + `@Observable` is a large, churn-heavy migration for a family app with two admins. Revisit after v1 ships. Recorded so the choice is deliberate, not accidental. |
-| C3 | Xcode | **26.0.1**, already installed at `/Applications/Xcode.app`. `xcode-select` currently points at `/Library/Developer/CommandLineTools`, so `xcodebuild` and `simctl` do not work. Fixed in Phase 0 (needs `sudo`). | Nothing else in the plan can be verified until this is right. |
-| C4 | Simulator | One pinned iPhone simulator, **name recorded in Phase 0** after enumerating what is actually installed. No iOS runtime was detectable before `xcode-select` was fixed, so the runtime may need downloading. | `CLAUDE.md`'s example command named "iPhone 16", which may not exist on this machine; it now carries a `<device from the list above>` placeholder instead. Phase 0 records the real name in both documents — a guessed device name fails every build command. |
-| C5 | Adding Swift files | **Files auto-add. No Xcode GUI step, no `project.pbxproj` edits.** The target uses a `PBXFileSystemSynchronizedRootGroup` over the inner `bearlake-client/` folder (`objectVersion = 77`): any `.swift` file created anywhere beneath it is compiled into the target automatically. | **This contradicts `CLAUDE.md`'s working agreement** ("New Swift files do not auto-add to the Xcode target… `project.pbxproj` is authoritative and hand-managed"), which was written for the older project format. Evidence: the `PBXSourcesBuildPhase` `files` list is *empty* and neither existing Swift file is referenced individually, yet the app builds. **`CLAUDE.md` has been corrected to match; Phase 0 step 8 still confirms it empirically with a build**, since the whole plan's file-creation workflow rests on it. The "never hand-edit `project.pbxproj`" half of that rule still stands and gets stronger — the file is now generated, not curated. |
+| C3 | Xcode | **26.0.1 (17A400)**, at `/Applications/Xcode.app`. ✅ `xcode-select` repointed in Phase 0; `xcodebuild` and `simctl` both work. | Nothing else in the plan could be verified until this was right — which is why it was step 1. |
+| C4 | Simulator | **`platform=iOS Simulator,name=iPhone 17`** — recorded in Phase 0 from `xcrun simctl list devices available`, and verified by an actual build, install, and launch. **Only iOS 26.0 runtimes are installed** (no iOS 17 runtime), so the app is *built* against a 17.0 deployment target but *run* on 26.0. | The toolchain turned out to be Xcode 26.0.1 with 15 available devices. Running on 26 while targeting 17 is the normal arrangement and is safe in one direction that matters: the compiler rejects any API newer than the deployment target, so accidental iOS 18+ usage fails the build rather than crashing a family member's phone. What it does **not** catch is iOS 17 *runtime* behaviour differences. If anything date-, layout-, or SwiftData-related looks suspicious, install an iOS 17 runtime and re-check rather than assuming. |
+| C5 | Adding Swift files | **Files auto-add. No Xcode GUI step, no `project.pbxproj` edits.** The target uses a `PBXFileSystemSynchronizedRootGroup` over the inner `bearlake-client/` folder (`objectVersion = 77`): any `.swift` file created anywhere beneath it is compiled into the target automatically. | **This contradicts `CLAUDE.md`'s working agreement** ("New Swift files do not auto-add to the Xcode target… `project.pbxproj` is authoritative and hand-managed"), which was written for the older project format. Evidence: the `PBXSourcesBuildPhase` `files` list is *empty* and neither existing Swift file is referenced individually, yet the app builds. **✅ PROVEN in Phase 0.** `Utilities/BuildProbe.swift` was created from the command line in a folder named nowhere in `project.pbxproj`, referenced from `PlaceholderView`, and the app built, installed, launched, and rendered the probe's string on screen; `nm` showed the `BuildProbe` symbol in the binary. Files auto-add — no GUI step, ever, for new Swift files. The probe has been deleted. The "never hand-edit `project.pbxproj`" half of that rule still stands and gets stronger — the file is now generated, not curated. |
 | C6 | Test target | A unit-test target must be **created once in Xcode's GUI** (File → New → Target → Unit Testing Bundle, named `bearlake-clientTests`). Synchronized groups auto-add *files*, not *targets*. | The one unavoidable GUI step in the whole plan. Done in Phase 0 so every later phase can run `xcodebuild test` from the CLI. |
 | C7 | Test framework | **Swift Testing** (`import Testing`, `@Test`, `#expect`). Native in Xcode 16+. | Cleaner than XCTest for value-oriented tests, which is nearly all of this app's logic. XCTest remains available if a specific need appears. |
 | C8 | UI tests | **None** (no XCUITest bundle). Verification at each phase gate is a **scripted manual simulator run** with screenshots, mirroring how `bearlake-web` used browser checks. | XCUITest is slow and brittle, and it is a second test stack to maintain for a two-admin app. The simulator check catches what unit tests cannot — layout, navigation, Dynamic Type — without that cost. |
@@ -43,7 +43,7 @@ Every open or unspecified choice, resolved. Final for v1. Referenced as **C1…C
 | # | Decision | Choice | Rationale |
 |---|---|---|---|
 | C12 | API base URL | One `AppConfig` enum. `#if DEBUG` → `http://localhost:3000/api/v1`; release → `https://bearlake-server-production.up.railway.app/api/v1`. No secrets — the API URL is public. | Mirrors the web app's single-source-of-truth config (W33) without a build-settings mechanism the app does not need. |
-| C13 | App Transport Security | DEBUG builds talk to `localhost` over HTTP, which ATS may refuse. Mitigation, applied in Phase 0: add a real `Info.plist` with `NSAppTransportSecurity → NSAllowsLocalNetworking = true`, set `GENERATE_INFOPLIST_FILE = NO` and `INFOPLIST_FILE`. **Phase 2 verifies an actual localhost request succeeds** before any feature depends on it. | `NSAllowsLocalNetworking` is Apple's sanctioned key for exactly this and does not weaken production HTTPS. Treated as a risk to *verify* rather than an assumption, because a silently blocked request looks like a bug in our code. The simulator shares the Mac's network stack, so `localhost` resolves; a physical device does not, which is why Phase 11's device check runs against the deployed API instead. |
+| C13 | App Transport Security | DEBUG builds talk to `localhost` over HTTP, which ATS may refuse. Mitigation, applied in Phase 0: a real `Info.plist` with `NSAppTransportSecurity → NSAllowsLocalNetworking = true`, plus **`INFOPLIST_FILE = Info.plist` with `GENERATE_INFOPLIST_FILE` left at `YES`** (the merge is verified — see Phase 0 step 6; the original "set it to NO and hand-copy the keys" instruction is superseded). **Phase 2 verifies an actual localhost request succeeds** before any feature depends on it. | `NSAllowsLocalNetworking` is Apple's sanctioned key for exactly this and does not weaken production HTTPS. Treated as a risk to *verify* rather than an assumption, because a silently blocked request looks like a bug in our code. The simulator shares the Mac's network stack, so `localhost` resolves; a physical device does not, which is why Phase 11's device check runs against the deployed API instead. |
 | C14 | Networking | `URLSession` + `async throws`, behind a `BearLakeAPI` **protocol** in `Services/`. ViewModels depend on the protocol. | Spec §7.3. Protocol-backed is what makes ViewModels testable without a server. |
 | C15 | Request bodies | **Exact field sets**, one `Encodable` request struct per endpoint. Never a general-purpose dictionary or a `Partial`-style type. | The server uses `z.strictObject` everywhere — an unknown key is a **400**, not a silent strip. Same rule the web app follows (W11). |
 | C16 | Response envelopes | Transcribed per-endpoint from `bearlake-web/src/api/endpoints.ts`, which is verified against the running server: named wrappers for lists (`{events}`, `{categories}`, `{articles}`, `{quickTips}`, `{users}`; `{items, nextCursor}` for announcements), **bare objects** for create/get/patch, **204 with no body** for `DELETE` and `logout`. | Re-deriving these from the server source risks a mismatch the web app already paid to discover. |
@@ -170,26 +170,82 @@ Nothing here is app code; it is making the build verifiable. Several steps need 
 
 **Steps:**
 
-1. **Point the toolchain at Xcode** (user runs; requires `sudo`):
-   `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`
-   then `sudo xcodebuild -license accept`. Verify: `xcodebuild -version` prints 26.0.1.
-2. **Ensure an iOS simulator runtime exists.** `xcrun simctl list runtimes` must list an iOS runtime; if empty, `xcodebuild -downloadPlatform iOS` (or Xcode → Settings → Components). This is a multi-GB download — start it early.
-3. **Record the destination.** Run `xcrun simctl list devices available`, pick an iPhone, and write the exact string into this plan under C4, e.g. `platform=iOS Simulator,name=iPhone 17`. Update `CLAUDE.md`'s command block to match.
+1. **Point the toolchain at Xcode.** ✅ Done by the user. `xcodebuild -version` → **Xcode 26.0.1 (17A400)**.
+2. **Ensure an iOS simulator runtime exists.** ✅ Two **iOS 26.0** runtimes were already installed; no download needed. **No iOS 17 runtime** — see C4 for what that does and does not cover.
+3. **Record the destination.** ✅ **`platform=iOS Simulator,name=iPhone 17`**, recorded in C4 and in `CLAUDE.md`'s command block.
 4. **Set the deployment target to 17.0** (C1) in Xcode → target → General, or by editing the target's build settings in the GUI. Confirm `IPHONEOS_DEPLOYMENT_TARGET = 17.0`.
-5. **Create the test target** (C6): File → New → Target → Unit Testing Bundle, product name `bearlake-clientTests`, and confirm it is added to the scheme's Test action.
-6. **Add `Info.plist` with the ATS exception** (C13): `NSAppTransportSecurity → NSAllowsLocalNetworking = YES`; set `GENERATE_INFOPLIST_FILE = NO` and `INFOPLIST_FILE = Info.plist`. Keep every other generated key (display name, launch screen) by copying them across.
-7. **Create the folder skeleton** from §3 and move the two template files: `bearlake_clientApp.swift` → `App/BearLakeApp.swift`, delete `ContentView.swift`. Replace the body with a placeholder that renders the app name.
-8. **Confirm C5 empirically.** Add a throwaway `Utilities/BuildProbe.swift` containing a symbol the placeholder view references, build, and confirm it compiles **without touching Xcode**. This is the evidence that files auto-add. Delete the probe afterwards.
-9. **Write one trivial test** (`#expect(true)`) purely to prove the test target runs from the CLI.
-10. **Add a `.gitignore`** — the repo has none, anywhere. Cover `.build/`, `DerivedData/`, `*.xcuserdatad/`, `xcuserdata/`, `.DS_Store`. Then **untrack the three files already committed** that should never have been:
-    `git rm --cached .DS_Store` and the two under `bearlake-client.xcodeproj/**/xcuserdata/`. These are per-developer Xcode window state; they are why `git status` has shown a dirty tree throughout the server and web builds. `.gitignore` alone will not untrack them.
+5. **Create the test target** (C6): File → New → Target → Unit Testing Bundle, product name `bearlake-clientTests`, and confirm it is added to the scheme's Test action. The folder and its first test file already exist — **delete the template test file Xcode generates** so the bundle does not carry two.
+
+    **Also mark the scheme "Shared"** while in the GUI (Product → Scheme → Manage Schemes → tick *Shared*). *Found during Phase 0:* the `bearlake-client` scheme lives only in `xcuserdata/` — it is per-developer and was never shared, so it is not in version control. Everything in this plan and in `CLAUDE.md` invokes `-scheme bearlake-client`, which today works only because Xcode autocreates the scheme locally. Sharing it puts it in `xcshareddata/xcschemes/` where it is committed and resolves in a fresh clone.
+6. **Add `Info.plist` with the ATS exception** (C13). File written at `bearlake-client/Info.plist`, `plutil -lint` clean, containing only `NSAppTransportSecurity → NSAllowsLocalNetworking = true`. **Build-settings half is a GUI step and is not done.**
+
+    *Plan amendment.* This step originally said to set `GENERATE_INFOPLIST_FILE = NO` and hand-copy the generated keys across. **Prefer the merge instead:** leave `GENERATE_INFOPLIST_FILE = YES` and set only `INFOPLIST_FILE = Info.plist`. Xcode merges its `INFOPLIST_KEY_*` build settings into the supplied file, so the four generated keys this target uses (`UIApplicationSceneManifest_Generation`, `UIApplicationSupportsIndirectInputEvents`, `UILaunchScreen_Generation`, and both orientation lists) keep flowing from build settings rather than being frozen into a file that then silently rots when the template changes. Hand-copying them is the thing most likely to be got subtly wrong here.
+
+    **✅ Merge behaviour verified on Xcode 26.0.1.** Built with `INFOPLIST_FILE=Info.plist GENERATE_INFOPLIST_FILE=YES` as command-line overrides; the built `.app`'s `Info.plist` contains **both** `NSAppTransportSecurity → NSAllowsLocalNetworking = true` **and** every generated key (`UILaunchScreen`, `UIApplicationSceneManifest`, both orientation lists, `CFBundleExecutable`). The fallback is not needed. Note that with `INFOPLIST_FILE` unset, the checked-in file is ignored **silently** — the build succeeds and ATS simply is not configured, which would surface much later as an unexplained localhost failure in Phase 2.
+7. **Create the folder skeleton** from §3 and move the two template files. ✅ Done. `bearlake_clientApp.swift` → `App/BearLakeApp.swift` (via `git mv`, so history follows), struct renamed `bearlake_clientApp` → `BearLakeApp`, `ContentView.swift` deleted, and `PlaceholderView` renders the app name. Only folders that contain files are in git — empty ones exist on disk but git does not track them, and each later phase creates its own.
+8. **Confirm C5 empirically.** ✅ **Done and passed.** The probe built, the symbol appeared in the binary (`nm`), and its string rendered on screen in the simulator. Probe and its reference in `PlaceholderView` deleted; the app rebuilds clean without them. **C5 is settled — create Swift files from the CLI for the rest of the project without touching Xcode.**
+9. **Write one trivial test** (`#expect(true)`) purely to prove the test target runs from the CLI. ✅ Written at `bearlake-clientTests/ToolchainTests.swift`; **running it is blocked** on steps 1 and 5. It deliberately does not reference `BuildProbe`, so deleting the probe in step 8 cannot break the suite.
+10. **Add a `.gitignore`.** ✅ Done. *(Plan correction: this step claimed "the repo has none, anywhere". Wrong — `bearlake-server/` and `bearlake-web/` each have one. What was missing was a **root** `.gitignore` and one for `bearlake-client/`.)* Added both, matching the existing per-app convention: root covers `.DS_Store`; `bearlake-client/` covers `build/`, `DerivedData/`, `xcuserdata/`, `*.xcuserdatad/`, `*.xcuserstate`, `.build/`, `.swiftpm/`. It deliberately does **not** ignore `xcshareddata/` — see step 5's scheme-sharing note. Then untracked the three already-committed files with `git rm --cached` (`.gitignore` alone will not untrack them); `git check-ignore` confirms all three are now ignored, and the working tree is finally clean.
 11. ~~**Amend `CLAUDE.md`** (C5/C10)~~ — **done ahead of Phase 0**, in the same PR as this plan. The "new Swift files do not auto-add" agreement is corrected, the `-scheme BearLake` commands are now `bearlake-client`, the "never hand-edit `project.pbxproj`" rule is kept and split out, and the Swift-specific date, image-cache, and UIKit-exception rules from §2 are folded in. **One piece is deliberately left open:** the simulator destination is a `<device from the list above>` placeholder, since the real device name is unknowable until step 1 fixes `xcode-select`. Fill it in as part of step 3.
 
 **Tests:** the placeholder test runs green via `xcodebuild test`.
 
 **Gate:** §4, plus a screenshot of the placeholder app running in the simulator.
 
----
+#### Phase 0 status — ✅ COMPLETE
+
+Toolchain live (Xcode 26.0.1), all four GUI steps applied, and the gate met: **the app builds, installs, launches, and renders on the iPhone 17 simulator, and `xcodebuild test` runs green** (`ToolchainTests/testTargetRuns()` passed).
+
+| # | Step | Status |
+|---|---|---|
+| 1 | Toolchain → Xcode | ✅ Xcode 26.0.1 (17A400) |
+| 2 | Simulator runtime | ✅ two iOS 26.0 runtimes (no iOS 17 — see C4) |
+| 3 | Destination recorded | ✅ `platform=iOS Simulator,name=iPhone 17` |
+| 4 | Deployment target | ✅ **app target 17.0** (see the 17.6 note below) |
+| 5 | Test target + shared scheme | ✅ `bearlake-clientTests` builds and runs; scheme in `xcshareddata/` |
+| 6 | `Info.plist` | ✅ `INFOPLIST_FILE` set; ATS **and** all generated keys in the built bundle |
+| 7 | Folder skeleton | ✅ Done |
+| 8 | C5 proof | ✅ **Proven**, probe deleted |
+| 9 | Placeholder test | ✅ Passes from the CLI |
+| 10 | `.gitignore` + untrack | ✅ Done, tree clean |
+| 11 | `CLAUDE.md` | ✅ Done in the plan's PR |
+
+**Verified from the CLI against a build with no command-line overrides** — i.e. the persisted settings standing on their own:
+
+```
+NSAllowsLocalNetworking : true      MinimumOSVersion  : 17.0
+UILaunchScreen          : present   SceneManifest     : present
+orientations~iphone     : present
+```
+
+##### One discrepancy, deliberately not blocking: 17.6 vs 17.0
+
+`IPHONEOS_DEPLOYMENT_TARGET` resolves to:
+
+| Scope | Value |
+|---|---|
+| **app target `bearlake-client`** | **17.0** ✅ |
+| project-level default | 17.6 |
+| test target `bearlake-clientTests` | 17.6 |
+
+Xcode's *Minimum Deployments* picker offers discrete point releases, and the project-level and inherited test-target values landed on **17.6**.
+
+**The app target is the one that ships, and it is correct** — the built bundle reports `MinimumOSVersion 17.0`, so C1 is satisfied and no family member is excluded. The other two are harmless today: test code never ships, and the only installed runtimes are iOS 26 regardless.
+
+Two reasons to tidy it anyway, next time the project is open in Xcode — **not worth a trip on its own**:
+
+1. The project-level value is what any **new target** inherits. The plan creates none, so this is latent rather than active.
+2. Anyone reading the project settings to answer *"what iOS do we support?"* gets 17.6, which contradicts C1 and this plan.
+
+Fix: PROJECT → Info → *iOS Deployment Target* → **17.0**, and TARGET `bearlake-clientTests` → General → *Minimum Deployments* → **17.0**.
+
+##### Gate evidence
+
+- `xcodebuild build` → **BUILD SUCCEEDED**, no warnings surfaced
+- `xcodebuild test` → `Test case 'ToolchainTests/testTargetRuns()' passed`
+- Simulator screenshot: the placeholder renders "Bear Lake" with the SF Symbol, correct safe-area insets, stock styling
+
+**Phase 1 is unblocked.** Swift files are created from the CLI with no Xcode involvement (C5, proven); `xcodebuild build` and `xcodebuild test` are the loop.
 
 ### Phase 1 — Domain models, block schema, and date utilities
 
