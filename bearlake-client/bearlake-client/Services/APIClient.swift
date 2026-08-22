@@ -20,6 +20,15 @@ actor APIClient: BearLakeAPI {
     /// 401 with no refresh token at all. The app routes to login.
     private let onSessionExpired: @Sendable () async -> Void
 
+    /// Called when any route answers `PASSWORD_CHANGE_REQUIRED`.
+    ///
+    /// The gate is not only a login-time condition: an admin can reset a
+    /// user's password while that user has the app open, and every
+    /// subsequent request then 403s with this code. Intercepting centrally
+    /// means the app flips into the forced-change state from wherever it
+    /// fires, rather than each call site having to recognise it (step 4).
+    private let onPasswordChangeRequired: @Sendable () async -> Void
+
     /// The refresh currently in progress, if any. Concurrent 401s await this
     /// same task rather than each starting their own.
     private var refreshTask: Task<Bool, Never>?
@@ -28,12 +37,14 @@ actor APIClient: BearLakeAPI {
         baseURL: URL,
         session: URLSession = .shared,
         tokens: TokenStore,
-        onSessionExpired: @escaping @Sendable () async -> Void = {}
+        onSessionExpired: @escaping @Sendable () async -> Void = {},
+        onPasswordChangeRequired: @escaping @Sendable () async -> Void = {}
     ) {
         self.baseURL = baseURL
         self.session = session
         self.tokens = tokens
         self.onSessionExpired = onSessionExpired
+        self.onPasswordChangeRequired = onPasswordChangeRequired
     }
 
     // MARK: - Request plumbing
@@ -124,7 +135,14 @@ actor APIClient: BearLakeAPI {
 
     private func validate(data: Data, response: HTTPURLResponse) throws -> Data {
         guard (200..<300).contains(response.statusCode) else {
-            throw try mapError(data: data, status: response.statusCode)
+            let error = try mapError(data: data, status: response.statusCode)
+            if error.is(.passwordChangeRequired) {
+                // Fire and forget: the caller still gets the error, and the
+                // app independently flips into the forced-change state.
+                let notify = onPasswordChangeRequired
+                Task { await notify() }
+            }
+            throw error
         }
         return data
     }

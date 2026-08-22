@@ -501,3 +501,62 @@ struct LogoutTests {
         #expect(await tokens.hasSession == false)
     }
 }
+
+// MARK: - Password-change gate interception (Phase 3 step 4)
+
+struct PasswordGateTests {
+    /// The gate is not only a login-time condition: an admin can reset a
+    /// user's password while that user has the app open, and every
+    /// subsequent request then 403s with this code.
+    @Test("PASSWORD_CHANGE_REQUIRED from any route notifies the app")
+    func interceptsGateCode() async throws {
+        let state = StubState()
+        state.setHandler { _ in
+            .init(status: 403, body: json("""
+            {"error":{"code":"PASSWORD_CHANGE_REQUIRED","message":"Change your password first."}}
+            """))
+        }
+        let flagged = LockedFlag()
+        let tokens = TokenStore(secureStore: InMemorySecureStore(), key: "refresh")
+        let client = APIClient(
+            baseURL: baseURL,
+            session: TestSession.make(state),
+            tokens: tokens,
+            onPasswordChangeRequired: { flagged.set() }
+        )
+        await tokens.setAccessToken("token")
+
+        // The caller still receives the error…
+        do {
+            _ = try await client.listQuickTips()
+            Issue.record("expected a failure")
+        } catch let error as APIError {
+            #expect(error.is(.passwordChangeRequired))
+        }
+
+        // …and the app is told independently. The notification is fired off
+        // rather than awaited, so give it a moment to land.
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(flagged.value, "the app must flip into the forced-change state")
+    }
+
+    @Test("an ordinary 403 does not trip the gate")
+    func ignoresPlainForbidden() async throws {
+        let state = StubState()
+        state.setHandler { _ in
+            .init(status: 403, body: json(
+                #"{"error":{"code":"FORBIDDEN","message":"Only an admin can do that."}}"#))
+        }
+        let flagged = LockedFlag()
+        let tokens = TokenStore(secureStore: InMemorySecureStore(), key: "refresh")
+        let client = APIClient(
+            baseURL: baseURL, session: TestSession.make(state), tokens: tokens,
+            onPasswordChangeRequired: { flagged.set() }
+        )
+        await tokens.setAccessToken("token")
+
+        await #expect(throws: APIError.self) { try await client.listQuickTips() }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(flagged.value == false)
+    }
+}
