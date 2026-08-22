@@ -274,6 +274,41 @@ Pure Swift, no networking, no UI. The most heavily tested phase in the plan.
 
 **Gate:** §4 (steps 3–4 are a no-op this phase; note that in the PR).
 
+#### Phase 1 status — ✅ COMPLETE
+
+**101 tests green, zero build warnings**, on a clean build. Gate steps 3–4 are the anticipated no-op: this phase adds no screens, so the simulator run confirms only that the app still launches with the new code linked in.
+
+| # | Step | Status |
+|---|---|---|
+| 1 | `Models/DTOs/` | ✅ (less `InfoArticle`, moved to step 2) |
+| 2 | `Models/Block.swift` + `JSONValue` + `InfoArticle` | ✅ |
+| 3 | `Models/EventDates.swift` | ✅ |
+| 4 | `Utilities/CabinDate.swift` | ✅ |
+| 5 | `Utilities/YouTube.swift` | ✅ |
+| 6 | `Models/Limits.swift` | ✅ |
+
+**Step order changed twice, both times because Swift compiles the target as a whole** and a step that cannot build cannot be tested:
+- `InfoArticle` moved from step 1 to step 2 — it carries decoded blocks.
+- Step 6 (`Limits`) was taken before step 5 (`YouTube`), which references the id pattern.
+
+##### Mutation check
+
+The §6 checklist asks whether the new tests actually fail when the feature breaks. The C22 bug was injected deliberately — `components(fromDateOnly:)` rewritten to build a `Date` from the literal via `ISO8601DateFormatter` — and **12 tests failed**, including `neverShifts` at the negative-offset zones, all three all-day label tests, and the DST arithmetic. Reverted; 101 green again. The date suite is load-bearing.
+
+##### Two implicit defaults, deliberate
+
+`CabinDate.init(timeZone: = .current, locale: = .current)` and `todayDateOnly(now: = Date())`. These are default *parameters*, not inline reads, so every test pins them explicitly and C26 is satisfied where it matters. They exist because the viewer's own zone is the correct default for display (C28). Worth knowing they are there: a ViewModel that constructs `CabinDate()` silently picks up the device zone, which is right for production and wrong in a test that forgets to inject.
+
+##### Resolved during Phase 1: `SWIFT_DEFAULT_ACTOR_ISOLATION`
+
+The Xcode template set **`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`** on the app target, making every type implicitly `@MainActor`. That contradicts **C2**, which enforces isolation by hand (`@MainActor` on ViewModels, `actor` for shared mutable state) — a strategy that only works when types are nonisolated by default. Left in place it would have fought Phase 2's `actor TokenStore`, `actor ImageCache`, and off-main-actor `APIClient` directly.
+
+Symptom: a clean test run emitted **49** *"main actor-isolated conformance … cannot be used in nonisolated context; this is an error in the Swift 6 language mode"* warnings — 10 after step 1, growing with every type. The app target itself built clean; the warnings appeared only where the nonisolated test target touched the DTOs.
+
+**✅ Fixed.** Set to `nonisolated` on both configurations of the app target (Xcode GUI). Verified on a clean run: **0 warnings, 101 tests green**. The test target needs no change — unset already resolves to nonisolated there.
+
+Not worked around by scattering `nonisolated` across individual types, which would have hidden a setting that should simply be correct and had to be undone later.
+
 ---
 
 ### Phase 2 — Networking, Keychain, and the session
