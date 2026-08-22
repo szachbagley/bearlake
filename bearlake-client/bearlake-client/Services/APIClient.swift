@@ -249,12 +249,23 @@ actor APIClient: BearLakeAPI {
         return session
     }
 
+    /// Best-effort revocation, then an unconditional local clear (C21).
+    ///
+    /// Deliberately does not rethrow a failed revocation. A sign-out that
+    /// reports failure while the user is, locally, signed out is worse than
+    /// silence: there is nothing they can do about it, and the server-side
+    /// token expires on its own. What must never happen is the opposite —
+    /// returning while the credentials are still on the device.
+    ///
+    /// The clear is awaited rather than fired off in a `defer`, so a caller
+    /// that checks `hasSession` immediately afterwards sees the truth.
     func logout() async throws {
-        defer { Task { await tokens.clear() } }
-        guard let refreshToken = await tokens.refreshToken else { return }
-        try await requestVoid(
-            path: "auth/logout", method: .post, body: LogoutRequest(refreshToken: refreshToken)
-        )
+        if let refreshToken = await tokens.refreshToken {
+            try? await requestVoid(
+                path: "auth/logout", method: .post, body: LogoutRequest(refreshToken: refreshToken)
+            )
+        }
+        await tokens.clear()
     }
 
     func changePassword(currentPassword: String, newPassword: String) async throws -> SessionResult {

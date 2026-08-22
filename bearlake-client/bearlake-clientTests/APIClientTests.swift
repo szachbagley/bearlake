@@ -434,3 +434,70 @@ final class LockedFlag: @unchecked Sendable {
     func set() { lock.lock(); flag = true; lock.unlock() }
     var value: Bool { lock.lock(); defer { lock.unlock() }; return flag }
 }
+
+// MARK: - Logout (C21)
+
+struct LogoutTests {
+    @Test("logout revokes server-side and clears locally")
+    func revokesAndClears() async throws {
+        let state = StubState()
+        state.setHandler { _ in .init(status: 204, body: Data()) }
+        let store = InMemorySecureStore()
+        try store.save("refresh-value", for: "refresh")
+        let (client, tokens) = makeClient(state: state, store: store)
+        await tokens.setAccessToken("access")
+
+        try await client.logout()
+
+        #expect(state.count(path: "/auth/logout") == 1)
+        #expect(await tokens.refreshToken == nil)
+        #expect(await tokens.accessToken == nil)
+    }
+
+    /// The failure that matters: a dropped connection must not leave the user
+    /// apparently signed in. Checked synchronously right after the call
+    /// returns — an earlier version cleared inside a `defer { Task { … } }`,
+    /// which returned before the clear had run.
+    @Test("a failed revocation still clears the session")
+    func clearsEvenWhenRevocationFails() async throws {
+        let store = InMemorySecureStore()
+        try store.save("refresh-value", for: "refresh")
+        let tokens = TokenStore(secureStore: store, key: "refresh")
+        await tokens.setAccessToken("access")
+        let client = APIClient(
+            baseURL: baseURL, session: TestSession.offline(), tokens: tokens
+        )
+
+        try await client.logout()
+
+        #expect(await tokens.refreshToken == nil)
+        #expect(await tokens.accessToken == nil)
+        #expect(await tokens.hasSession == false)
+        #expect(store.isEmpty)
+    }
+
+    @Test("a 500 from logout still clears the session")
+    func clearsOnServerError() async throws {
+        let state = StubState()
+        state.setHandler { _ in
+            .init(status: 500, body: Data(#"{"error":{"code":"INTERNAL","message":"boom"}}"#.utf8))
+        }
+        let store = InMemorySecureStore()
+        try store.save("refresh-value", for: "refresh")
+        let (client, tokens) = makeClient(state: state, store: store)
+
+        try await client.logout()
+        #expect(await tokens.hasSession == false)
+    }
+
+    @Test("logging out with no session is a no-op, not an error")
+    func logoutWithoutSession() async throws {
+        let state = StubState()
+        state.setHandler { _ in .init(status: 204, body: Data()) }
+        let (client, tokens) = makeClient(state: state)
+
+        try await client.logout()
+        #expect(state.count(path: "/auth/logout") == 0, "nothing to revoke")
+        #expect(await tokens.hasSession == false)
+    }
+}
