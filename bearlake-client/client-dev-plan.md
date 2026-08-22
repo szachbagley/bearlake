@@ -299,19 +299,15 @@ The §6 checklist asks whether the new tests actually fail when the feature brea
 
 `CabinDate.init(timeZone: = .current, locale: = .current)` and `todayDateOnly(now: = Date())`. These are default *parameters*, not inline reads, so every test pins them explicitly and C26 is satisfied where it matters. They exist because the viewer's own zone is the correct default for display (C28). Worth knowing they are there: a ViewModel that constructs `CabinDate()` silently picks up the device zone, which is right for production and wrong in a test that forgets to inject.
 
-##### Blocking issue for Phase 2: `SWIFT_DEFAULT_ACTOR_ISOLATION`
+##### Resolved during Phase 1: `SWIFT_DEFAULT_ACTOR_ISOLATION`
 
-The Xcode template set **`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`** on the app target, so every type is implicitly `@MainActor`. A clean test run emits **49 warnings** of the form *"main actor-isolated conformance ... cannot be used in nonisolated context; this is an error in the Swift 6 language mode."* The count was 10 after step 1 and grows with every type added.
+The Xcode template set **`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`** on the app target, making every type implicitly `@MainActor`. That contradicts **C2**, which enforces isolation by hand (`@MainActor` on ViewModels, `actor` for shared mutable state) — a strategy that only works when types are nonisolated by default. Left in place it would have fought Phase 2's `actor TokenStore`, `actor ImageCache`, and off-main-actor `APIClient` directly.
 
-The app target itself builds with **zero** warnings — these surface only when the nonisolated test target touches the DTOs.
+Symptom: a clean test run emitted **49** *"main actor-isolated conformance … cannot be used in nonisolated context; this is an error in the Swift 6 language mode"* warnings — 10 after step 1, growing with every type. The app target itself built clean; the warnings appeared only where the nonisolated test target touched the DTOs.
 
-**This contradicts C2**, which says to enforce isolation by hand (`@MainActor` on ViewModels, `actor` for shared state) — a strategy that presupposes types are *not* MainActor by default. Phase 2 builds `actor TokenStore`, `actor ImageCache`, and an off-main-actor `APIClient` (C14/C18/C20/C35); that layer fights a MainActor default directly.
+**✅ Fixed.** Set to `nonisolated` on both configurations of the app target (Xcode GUI). Verified on a clean run: **0 warnings, 101 tests green**. The test target needs no change — unset already resolves to nonisolated there.
 
-**Verified fix**, run as a command-line override: `SWIFT_DEFAULT_ACTOR_ISOLATION=nonisolated` → **0 warnings, 101 tests still green**. Persisting it is a GUI step:
-
-> TARGET `bearlake-client` → Build Settings → search `default actor` → **Swift Compiler - Concurrency → Default Actor Isolation → `nonisolated`**
-
-Deliberately **not** worked around by scattering `nonisolated` across twenty types — that hides a setting that should simply be correct, and would have to be undone later.
+Not worked around by scattering `nonisolated` across individual types, which would have hidden a setting that should simply be correct and had to be undone later.
 
 ---
 
