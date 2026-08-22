@@ -337,6 +337,34 @@ Not worked around by scattering `nonisolated` across individual types, which wou
 
 **Gate:** §4. Run `/security-review` on this phase's diff.
 
+#### Phase 2 status — ✅ COMPLETE
+
+**127 tests green, zero warnings on a clean build.** All seven steps done.
+
+##### C13 verified against the real server
+
+The plan requires a real localhost request before this phase can close. With `bearlake-server` running locally, a temporary probe in the app made three calls from the simulator — **login, `/me`, and a range query — all succeeded** against `http://localhost:3000/api/v1`, confirmed from both ends (rendered in the app, and in the server's request log with a resolved `userId`). ATS permits cleartext localhost with **only** `NSAllowsLocalNetworking`; no arbitrary-loads escape hatch was needed. Probe reverted; the app file is byte-identical to before.
+
+##### Single-flight refresh, proven
+
+Four concurrent 401s produce **exactly one** `/auth/refresh` call. This is the bug the web app shipped under React StrictMode: refresh tokens rotate, and the server treats reuse of a rotated token as theft and revokes the whole family, so parallel refreshes sign the user out. `APIClient` is an `actor` specifically so the check-and-set on the in-flight task cannot interleave.
+
+Related paths also tested: a 401 *after* a successful refresh surfaces rather than looping; a failed refresh clears the Keychain and reports expiry instead of retrying with a token the server may already consider stolen; `/auth/login` and `/auth/refresh` never carry a bearer token.
+
+##### Bug found by the gate, not by the tests
+
+`logout()` cleared the session in `defer { Task { await tokens.clear() } }` — fire-and-forget, so the method could return while the credentials were still on the device. It also rethrew a failed revocation, so a dropped connection could report failure *and* leave the user apparently signed in, which is exactly what C21 forbids. Now the clear is awaited unconditionally and a failed revocation is not rethrown; four tests cover it, including the offline path checked synchronously after the call returns.
+
+##### Security review — clean
+
+No logging of any kind in the app target; no `UserDefaults`; access token in memory only; Keychain item at `kSecAttrAccessibleAfterFirstUnlock`; ATS narrowed to local networking; release build on HTTPS; no force-unwraps, `try!`, or TLS delegate overrides; the refresh token reaches only `/auth/refresh` and `/auth/logout`. Server logs contained no credential — the single grep hit was `commonPasswords=122`, a list size.
+
+##### Test-harness bug worth remembering
+
+The first `URLProtocol` stub kept one global "current state", which Swift Testing's **parallel execution** clobbered — the same test both passed and failed within a single run. States are now keyed by an id the session stamps onto every request via `httpAdditionalHeaders`. Any future shared test fixture needs the same treatment.
+
+
+
 ---
 
 ### Phase 3 — Auth, the session gate, and the app shell
