@@ -101,6 +101,8 @@ Every open or unspecified choice, resolved. Final for v1. Referenced as **C1…C
 | C48 | Admin affordances | Admin-only `+`/edit controls are **hidden** for members. This is a **UI affordance, not the security boundary** — the server independently rejects every admin route. Stated in code comments so no one mistakes it for the control. | Spec §3.1. Same framing the web app uses (W29). |
 | C49 | User management | **Not on iOS, ever.** No user list, no create, no reset. | `CLAUDE.md`: the web app is the only surface for user management. |
 | C50 | Accessibility | Dynamic Type through **XXL**, VoiceOver labels on every control, light and dark mode. Verified in the simulator at each gate, not just at the end. | `CLAUDE.md` §iOS styling. Retrofitting accessibility is far more expensive than maintaining it. |
+| C51 | Home announcement count | **Three**, matching the three upcoming events beside it. | Neither the spec nor the storyboard fixes a number — the storyboard's two is simply what fit the wireframe. |
+| C52 | UI automation | **`XcodeBuildMCP` 2.7.0**, project-scoped and version-pinned in `.mcp.json`. Semantic `snapshot-ui` + `tap`, not coordinates. | Added in Phase 4 after three phases of accumulating manual tap checks. Confirmed working for snapshot and tap; **list scrolling and daemon stability are unresolved** — see §7. The `simctl` fallback stays. |
 
 ---
 
@@ -635,9 +637,42 @@ Applied at every phase gate (step 5 of §4):
 
 ## 7. Skills and MCP servers
 
-**Strongly consider adding:**
+**Added in Phase 4: `XcodeBuildMCP` (C52).**
 
-- **An Xcode/simulator MCP server** (e.g. `XcodeBuildMCP`). This is the highest-leverage addition available for this plan. Everything in §4's gate — build, run, install to a booted simulator, capture a screenshot, read the app's logs — is otherwise raw `xcodebuild`/`simctl` parsing. It is the iOS analogue of what `claude-in-chrome` was for the web app, and the web build showed how much real-bug-catching came from driving the actual UI (two production bugs found in the browser that unit tests missed). **Decide before Phase 3**, the first phase with meaningful UI. If it is not added, the fallback is the `simctl` command set in §8, which works but produces far more terminal noise.
+Installed as a **project-scoped, version-pinned** server in `.mcp.json`:
+
+```json
+{"mcpServers":{"xcodebuild":{"type":"stdio","command":"npx",
+ "args":["-y","xcodebuildmcp@2.7.0","mcp"]}}}
+```
+
+Two setup details that cost time and are worth writing down:
+
+1. **The `mcp` subcommand is required.** `claude mcp add ... -- npx -y xcodebuildmcp@2.7.0` produces a config that omits it; the binary then prints usage, exits, and the client reports a 30-second connection timeout that looks like a network problem.
+2. **`npx -y` re-checks the registry on every launch** and blows that same 30-second timeout. `npm install -g xcodebuildmcp@2.7.0` once makes startup ~100 ms. The pinned `npx` form is kept in `.mcp.json` because it works on a fresh clone; the global install is a local speed-up, not a requirement.
+
+Project-scoped servers need approval before they load — either interactively, or via `enabledMcpjsonServers` in `.claude/settings.local.json` (gitignored, so each machine opts in itself).
+
+##### What it can actually do — tested in Phase 4
+
+`ui-automation` exposes `snapshot-ui`, `tap`, `type-text`, `swipe`, `drag`, `gesture`, `long-press`, `key-press`, and `screenshot`. It works from **semantic snapshots with element refs**, not screen coordinates, which is the property that makes it worth having.
+
+**Confirmed working:**
+
+- `snapshot-ui` returns a labelled element tree — and it reads this app's **own accessibility labels**, so the ☰ appears as `button|Settings` and the `+` as `button|New announcement`. That doubles as a live VoiceOver check.
+- `tap --element-ref` works: tapping *Older announcements* navigated correctly.
+- Combined rows show up as one element (`Aug 24, 2026, UI check announcement #25`), confirming `.accessibilityElement(children: .combine)`.
+
+**Did not work in this environment:**
+
+- **Vertical scrolling inside a SwiftUI `List`.** `swipe --withinElementRef` (the only scroll ref offered was the whole application) and `gesture --preset scroll-up` both failed to move the list; the gestures registered as *horizontal tab switches* instead. So "scroll to Load More and tap it" is still unreached.
+- **Daemon stability.** `snapshot-ui` intermittently hung for 3–5 minutes and the background daemon eventually stopped creating its socket, unrecoverable by restart or `purge`. Caveat on that: the CLI was being driven directly from a shell, because **MCP servers only connect at session start** so the tools were not loadable mid-session. The MCP path — which is the configured one, and where the server owns the daemon lifecycle rather than a shell hammering it — has not yet been exercised. Judge it on that path before concluding it is unreliable.
+
+##### Verdict
+
+Keep it. The semantic snapshot and tap are genuinely valuable and cover most of the residual manual surface. Two caveats carry forward: **verify it from a fresh session** (where the MCP server manages its own daemon), and **treat list scrolling as unsolved** until proven otherwise — which matters for Phase 5's calendar grid and Phase 8's article list.
+
+The `simctl` fallback in §8 remains correct and is still what every phase gate has actually used.
 
 **Use routinely:**
 
