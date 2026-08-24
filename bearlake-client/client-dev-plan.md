@@ -383,6 +383,40 @@ The first `URLProtocol` stub kept one global "current state", which Swift Testin
 
 **Gate:** §4 + a simulator pass through: launch → login → (forced change if applicable) → tab shell → ☰ → sign out → relaunch lands on login. Screenshot each.
 
+#### Phase 3 status — ✅ COMPLETE
+
+**150 tests green, zero warnings.** All seven steps, and the full gate sequence walked in the simulator against the live local server.
+
+##### Gate walkthrough — how it was driven, and why
+
+`simctl` has no tap primitive, and the AppleScript/accessibility route hangs waiting on a permission grant. Rather than add a UI-test target the plan explicitly rules out (C8), the sequence was driven through the **real ViewModel against the real server** by a temporary `#if DEBUG` stage driver reading credentials from the environment — the same pattern as the Phase 2 C13 probe. Nothing was compiled in; the driver has been reverted and `grep` confirms no trace remains.
+
+What that does and does not prove: it exercises the real views, the real `AuthViewModel`, the real `APIClient`, and a real server, and it proves each screen renders correctly and the state machine advances. It does **not** exercise tap targets or keyboard handling. Those are the residual manual check.
+
+| Screen | Verified |
+|---|---|
+| Login | No "create account", no "forgot password", admin-contact text present |
+| Forced change | **No tab bar, no Cancel** — the gate genuinely blocks the shell |
+| Tab shell | Calendar / Home / Information, **Home selected**, ☰ present |
+| Settings sheet | Signed-in identity, Change Password, Sign Out (destructive) |
+| Sign out → relaunch | **Lands on login** — Keychain genuinely cleared |
+
+The chain login-with-temp-password → forced gate → change → gate lifts → tab shell was walked end to end against a real account the server issued, and the subsequent sign-in used the *new* password, proving the change persisted server-side.
+
+##### Accessibility spot-check (C50)
+
+Login and the shell at **dark mode + `accessibility-extra-large`**: text wraps, nothing truncates or clips, stock system colours adapt. Simulator reset to light/medium afterwards.
+
+##### One sequencing mistake, worth recording
+
+The first relaunch check appeared to fail — it landed in the tab shell rather than login. The cause was my own ordering: the dark-mode captures ran *after* sign-out and re-authenticated, leaving a fresh token in the Keychain. Re-run in the correct order (sign out → relaunch, nothing between) it lands on login. Worth noting because the same trap will recur in any later phase that screenshots a signed-out state.
+
+##### Test-account hygiene
+
+A real member account was created to exercise the forced-change gate, then **deactivated, never deleted** — accounts are never deleted in this system so authorship history survives. The temporary-password artifacts were removed from disk, and neither the repo nor the server log contains any credential.
+
+
+
 ---
 
 ### Phase 4 — Home and All Announcements
