@@ -100,18 +100,19 @@ struct DayDetailView: View {
 
     // MARK: - Hour column
 
+    /// Deliberately not its own `ScrollView` — the page provides one. Nesting
+    /// two on the same axis put this column's scrollable area under the
+    /// floating tab bar, so swiping in it switched tabs.
     private var hourColumn: some View {
-        ScrollView {
-            LazyVStack(spacing: 0) {
-                ForEach(0..<24, id: \.self) { hour in
-                    HourRow(
-                        hour: hour,
-                        label: hourLabel(hour),
-                        events: timed.filter { model.hourRow(for: $0) == hour },
-                        onCreate: { onCreate(model.selectedDay) },
-                        onOpen: onOpen
-                    )
-                }
+        LazyVStack(spacing: 0) {
+            ForEach(0..<24, id: \.self) { hour in
+                HourRow(
+                    hour: hour,
+                    label: hourLabel(hour),
+                    events: timed.filter { model.hourRow(for: $0) == hour },
+                    onCreate: { onCreate(model.selectedDay) },
+                    onOpen: onOpen
+                )
             }
         }
     }
@@ -141,13 +142,21 @@ private struct HourRow: View {
     let onCreate: () -> Void
     let onOpen: (CalendarEvent) -> Void
 
+    /// The time gutter has to grow with the text. At a fixed width the label
+    /// wrapped mid-word at accessibility sizes — "1 A / M" — which is worse
+    /// than a wider gutter.
+    @ScaledMetric(relativeTo: .caption2) private var gutterWidth: CGFloat = 52
+
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Text(label)
                 .font(.caption2)
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
-                .frame(width: 52, alignment: .trailing)
+                .lineLimit(1)
+                .frame(width: gutterWidth, alignment: .trailing)
+                // The label is only meaningful next to an event; an empty
+                // row would otherwise make VoiceOver read all 24 hours.
                 .accessibilityHidden(events.isEmpty)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -180,7 +189,7 @@ private struct HourRow: View {
         }
         .padding(.horizontal)
         .overlay(alignment: .top) {
-            Divider().padding(.leading, 60)
+            Divider().padding(.leading, gutterWidth + 8)
         }
     }
 }

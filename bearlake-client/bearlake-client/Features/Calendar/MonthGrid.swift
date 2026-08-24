@@ -53,6 +53,11 @@ private struct DayCell: View {
     let isToday: Bool
     let hasEvents: Bool
 
+    /// The cell grows with Dynamic Type. At a fixed 30pt a two-digit day
+    /// truncated to "…" at accessibility sizes, which makes the grid
+    /// unreadable rather than merely cramped.
+    @ScaledMetric(relativeTo: .callout) private var cellSize: CGFloat = 30
+
     /// The day number, read off the string rather than recomputed — the
     /// string is the identity (C22).
     private var dayNumber: String {
@@ -66,8 +71,13 @@ private struct DayCell: View {
             Text(dayNumber)
                 .font(.callout)
                 .monospacedDigit()
+                .lineLimit(1)
+                // Seven columns cannot grow without bound on a phone, so
+                // this is the safety valve: shrink the digits rather than
+                // truncate them. A day number that reads "…" is useless.
+                .minimumScaleFactor(0.6)
                 .foregroundStyle(numberColor)
-                .frame(width: 30, height: 30)
+                .frame(width: cellSize, height: cellSize)
                 .background {
                     if isSelected {
                         Circle().fill(Color.accentColor)
