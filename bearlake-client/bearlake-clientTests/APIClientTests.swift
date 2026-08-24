@@ -560,3 +560,73 @@ struct PasswordGateTests {
         #expect(flagged.value == false)
     }
 }
+
+// MARK: - Announcement request shapes (C15)
+
+struct AnnouncementRequestShapeTests {
+    private func capturedBody(_ state: StubState) throws -> [String: Any] {
+        let request = try #require(state.requests.first)
+        // URLProtocol moves a streamed body off httpBody, so read either.
+        let data = try #require(
+            request.httpBody ?? request.httpBodyStream.map { stream -> Data in
+                stream.open()
+                defer { stream.close() }
+                var buffer = [UInt8](repeating: 0, count: 8192)
+                var collected = Data()
+                while stream.hasBytesAvailable {
+                    let read = stream.read(&buffer, maxLength: buffer.count)
+                    if read <= 0 { break }
+                    collected.append(contentsOf: buffer[0..<read])
+                }
+                return collected
+            }
+        )
+        return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    private let announcementJSON = """
+    {"id":"a1","body":"Hi","postedAt":"2026-08-01T12:00:00.000Z","createdBy":"u1",
+     "createdAt":"2026-08-01T12:00:00.000Z","updatedAt":"2026-08-01T12:00:00.000Z"}
+    """
+
+    @Test("create sends exactly body")
+    func createSendsOnlyBody() async throws {
+        let state = StubState()
+        state.setHandler { _ in .init(status: 200, body: json(announcementJSON)) }
+        let (client, _) = makeClient(state: state)
+
+        _ = try await client.createAnnouncement(body: "Marina code is 0000")
+
+        #expect(try Set(capturedBody(state).keys) == ["body"])
+    }
+
+    /// `postedAt` is displayed but never editable — the server sets it, and
+    /// sending it back is a 400 under the strict-body rule.
+    @Test("update sends exactly body, never postedAt")
+    func updateSendsOnlyBody() async throws {
+        let state = StubState()
+        state.setHandler { _ in .init(status: 200, body: json(announcementJSON)) }
+        let (client, _) = makeClient(state: state)
+
+        _ = try await client.updateAnnouncement(id: "a1", body: "Corrected text")
+
+        let fields = try capturedBody(state)
+        #expect(Set(fields.keys) == ["body"])
+        #expect(fields["postedAt"] == nil)
+        #expect(fields["id"] == nil)
+    }
+
+    @Test("delete sends no body and uses DELETE")
+    func deleteSendsNoBody() async throws {
+        let state = StubState()
+        state.setHandler { _ in .init(status: 204, body: Data()) }
+        let (client, _) = makeClient(state: state)
+
+        try await client.deleteAnnouncement(id: "a1")
+
+        let request = try #require(state.requests.first)
+        #expect(request.httpMethod == "DELETE")
+        #expect(request.httpBody == nil)
+        #expect(request.url?.path.hasSuffix("/announcements/a1") == true)
+    }
+}

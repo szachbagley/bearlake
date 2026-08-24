@@ -11,7 +11,7 @@ struct BearLakeApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView(auth: composition.auth)
+            RootView(auth: composition.auth, api: composition.api)
                 .task { await composition.auth.restore() }
         }
     }
@@ -29,6 +29,7 @@ struct BearLakeApp: App {
 @Observable
 final class AppComposition {
     let auth: AuthViewModel
+    let api: BearLakeAPI
 
     init() {
         let tokens = TokenStore()
@@ -49,6 +50,7 @@ final class AppComposition {
 
         let auth = AuthViewModel(api: client, tokens: tokens)
         self.auth = auth
+        self.api = client
         holder.value = auth
     }
 }
@@ -65,6 +67,7 @@ private final class AuthHolder: @unchecked Sendable {
 /// `SessionState` and nothing else.
 struct RootView: View {
     let auth: AuthViewModel
+    let api: BearLakeAPI
 
     var body: some View {
         switch auth.state {
@@ -77,7 +80,7 @@ struct RootView: View {
             // in this state.
             ChangePasswordView(auth: auth, mode: .forced)
         case .signedIn:
-            RootTabView(auth: auth)
+            RootTabView(auth: auth, api: api)
         }
     }
 }

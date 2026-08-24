@@ -13,6 +13,7 @@ import SwiftUI
 /// selected by default.
 struct RootTabView: View {
     let auth: AuthViewModel
+    let api: BearLakeAPI
 
     enum Tab: Hashable {
         case calendar, home, information
@@ -27,9 +28,12 @@ struct RootTabView: View {
                 .tabItem { Label("Calendar", systemImage: "calendar") }
                 .tag(Tab.calendar)
 
-            placeholder(title: "Bear Lake", symbol: "house.fill")
-                .tabItem { Label("Home", systemImage: "house.fill") }
-                .tag(Tab.home)
+            NavigationStack {
+                HomeView(auth: auth, api: api)
+                    .toolbar { settingsToolbarItem }
+            }
+            .tabItem { Label("Home", systemImage: "house.fill") }
+            .tag(Tab.home)
 
             placeholder(title: "Information", symbol: "lightbulb.fill")
                 .tabItem { Label("Information", systemImage: "lightbulb.fill") }
@@ -68,5 +72,5 @@ struct RootTabView: View {
 }
 
 #Preview {
-    RootTabView(auth: .preview())
+    RootTabView(auth: .preview(), api: PreviewAPI())
 }
