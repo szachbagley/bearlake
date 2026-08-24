@@ -1,0 +1,24 @@
+# XcodeBuildMCP project configuration (C52).
+#
+# Only `simulator` and `session-management` load by default, which gives you
+# snapshot_ui and screenshot but NOT tap / type_text / swipe — the half that
+# makes the phase gates automatable. Listing ui-automation here is what turns
+# those on (24 tools -> 36).
+schemaVersion: 1
+enabledWorkflows:
+  - session-management
+  - simulator
+  - ui-automation
+
+# Saves passing these on every call.
+#
+# Deliberately portable: `simulatorName` rather than `simulatorId`, and a
+# repo-relative `projectPath`. Running `session_set_defaults` with
+# persist:true rewrites this file and will re-add an absolute path and a
+# machine-local `simulatorId` UDID — strip both before committing, or the
+# config only works on the machine that wrote it.
+sessionDefaults:
+  projectPath: bearlake-client/bearlake-client.xcodeproj
+  scheme: bearlake-client
+  simulatorName: iPhone 17
+  bundleId: hansen.bearlake-client

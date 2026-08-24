@@ -223,6 +223,42 @@ struct CabinDate: Sendable {
         }
     }
 
+    // MARK: - Upcoming
+
+    /// Whether an event is finished as of `now`.
+    ///
+    /// An all-day event is still current **on** its last day, because the end
+    /// is inclusive (C25) — a stay through Jul 20 should not vanish from
+    /// "upcoming" on the morning of Jul 20.
+    func hasEnded(_ dates: EventDates, asOf now: Date) -> Bool {
+        switch dates {
+        case .allDay(_, let end):
+            return end < todayDateOnly(now: now)
+        case .timed(_, let end):
+            return end <= now
+        }
+    }
+
+    /// Ordering key for "what happens next".
+    ///
+    /// The day comes first as a **string**, so an all-day event is never
+    /// routed through `Date` to be sorted (C22). Within a day, all-day events
+    /// sort ahead of timed ones — matching how the day detail pins them to
+    /// the top — and timed events then order by their instant.
+    func upcomingSortKey(for dates: EventDates) -> (day: String, kind: Int, instant: TimeInterval) {
+        switch dates {
+        case .allDay(let start, _):
+            return (start, 0, 0)
+        case .timed(let start, _):
+            return (dateOnlyString(from: start), 1, start.timeIntervalSince1970)
+        }
+    }
+
+    /// A plain date label, for announcement timestamps.
+    func dateLabel(from date: Date) -> String {
+        formatter(dateStyle: .medium, timeStyle: .none).string(from: date)
+    }
+
     /// Multi-day and all-day events pin to the top of the day detail; timed
     /// single-day events fall into the hour column below.
     func spansMultipleDays(_ dates: EventDates) -> Bool {

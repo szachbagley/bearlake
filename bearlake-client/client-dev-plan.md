@@ -101,6 +101,8 @@ Every open or unspecified choice, resolved. Final for v1. Referenced as **C1…C
 | C48 | Admin affordances | Admin-only `+`/edit controls are **hidden** for members. This is a **UI affordance, not the security boundary** — the server independently rejects every admin route. Stated in code comments so no one mistakes it for the control. | Spec §3.1. Same framing the web app uses (W29). |
 | C49 | User management | **Not on iOS, ever.** No user list, no create, no reset. | `CLAUDE.md`: the web app is the only surface for user management. |
 | C50 | Accessibility | Dynamic Type through **XXL**, VoiceOver labels on every control, light and dark mode. Verified in the simulator at each gate, not just at the end. | `CLAUDE.md` §iOS styling. Retrofitting accessibility is far more expensive than maintaining it. |
+| C51 | Home announcement count | **Three**, matching the three upcoming events beside it. | Neither the spec nor the storyboard fixes a number — the storyboard's two is simply what fit the wireframe. |
+| C52 | UI automation | **`XcodeBuildMCP` 2.7.0**, project-scoped and version-pinned in `.mcp.json`, with `ui-automation` enabled via `.xcodebuildmcp/config.yaml`. Semantic `snapshot_ui` + `tap`, not coordinates. | Added in Phase 4 after three phases of accumulating manual tap checks. **Closed 12 of the 13 outstanding manual checks in one pass**, including the row swipe actions and pagination that `simctl` cannot reach at all. Use it for every gate from Phase 5 on; the `simctl` fallback stays for build/install/screenshot. |
 
 ---
 
@@ -433,6 +435,53 @@ A real member account was created to exercise the forced-change gate, then **dea
 
 **Gate:** §4 + simulator: create → edit → paginate → delete against the local API, then clean up the rows.
 
+#### Phase 4 status — ✅ COMPLETE
+
+**187 tests green, zero warnings.** Home is wired into the tab shell, replacing its placeholder.
+
+##### C51 — how many announcements Home shows
+
+Neither the spec nor the storyboard fixes a number; the storyboard's two is simply what fit the wireframe. **Three**, mirroring the "next three" events beside it.
+
+##### Verified against the live server, not just in tests
+
+The next-three rules were checked end to end with deliberately-chosen events on a real server (today was 2026-08-24):
+
+| Seeded | Expected | Result |
+|---|---|---|
+| Aug 20–23 ("ended yesterday") | hidden | ✅ |
+| Aug 22–**24** ("ends today") | **shown** — C25 inclusive end | ✅ |
+| Aug 28 timed | shown at local time | ✅ 16:00Z → 10:00 AM MDT |
+| Sep 4–7 | shown | ✅ |
+| Sep 20–22 (fourth) | hidden — capped at 3 | ✅ |
+
+The inclusive-end case is the one worth keeping: a stay through today must not vanish from Home on its own last morning.
+
+##### Gate sequence
+
+`simctl` still has no tap primitive, so create → edit → paginate → delete was run through the **real `AnnouncementsViewModel` against the live server** by a temporary probe, printing results on screen. 25 rows were seeded to force real pagination:
+
+```
+page1: 20 rows, more=true        create: ok
+page2: total 25                  edit: ok
+unique ids: 25 -> NO DUPES       postedAt unchanged: true
+exhausted: true                  delete: ok / gone after reload: true
+```
+
+`postedAt unchanged` is the one to keep an eye on — it proves the `{body}`-only update really does leave the server's timestamp alone.
+
+All 25 announcements and 5 events were deleted afterwards; both collections are back to empty. The probe is reverted and `grep` confirms no trace.
+
+##### Accessibility
+
+Home at dark mode + `accessibility-extra-large`: text wraps, nothing clips, the admin `+` stays reachable. Simulator reset afterwards.
+
+##### Residual — now closed
+
+Scrolling to "Load More" and tapping the row swipe actions were left open here, then **closed in the same phase** once `XcodeBuildMCP` was added (C52): 12 of the 13 outstanding manual checks were driven through the real UI against the live server. See §7 for the results table. The only item not run is the 5,001-character over-length case, which is redundant with an existing unit test.
+
+
+
 ---
 
 ### Phase 5 — Calendar month grid and day detail
@@ -588,9 +637,79 @@ Applied at every phase gate (step 5 of §4):
 
 ## 7. Skills and MCP servers
 
-**Strongly consider adding:**
+**Added in Phase 4: `XcodeBuildMCP` (C52).**
 
-- **An Xcode/simulator MCP server** (e.g. `XcodeBuildMCP`). This is the highest-leverage addition available for this plan. Everything in §4's gate — build, run, install to a booted simulator, capture a screenshot, read the app's logs — is otherwise raw `xcodebuild`/`simctl` parsing. It is the iOS analogue of what `claude-in-chrome` was for the web app, and the web build showed how much real-bug-catching came from driving the actual UI (two production bugs found in the browser that unit tests missed). **Decide before Phase 3**, the first phase with meaningful UI. If it is not added, the fallback is the `simctl` command set in §8, which works but produces far more terminal noise.
+Installed as a **project-scoped, version-pinned** server in `.mcp.json`:
+
+```json
+{"mcpServers":{"xcodebuild":{"type":"stdio","command":"npx",
+ "args":["-y","xcodebuildmcp@2.7.0","mcp"]}}}
+```
+
+Two setup details that cost time and are worth writing down:
+
+1. **The `mcp` subcommand is required.** `claude mcp add ... -- npx -y xcodebuildmcp@2.7.0` produces a config that omits it; the binary then prints usage, exits, and the client reports a 30-second connection timeout that looks like a network problem.
+2. **`npx -y` re-checks the registry on every launch** and blows that same 30-second timeout. `npm install -g xcodebuildmcp@2.7.0` once makes startup ~100 ms. The pinned `npx` form is kept in `.mcp.json` because it works on a fresh clone; the global install is a local speed-up, not a requirement.
+
+Project-scoped servers need approval before they load — either interactively, or via `enabledMcpjsonServers` in `.claude/settings.local.json` (gitignored, so each machine opts in itself).
+
+3. **`ui-automation` is off by default.** Out of the box the server registers **24 tools from `session-management, simulator`** — which includes `snapshot_ui` and `screenshot` but **not `tap`, `type_text`, or `swipe`**, so the interesting half is missing and it is not obvious why. Enabling it needs a project config at **`.xcodebuildmcp/config.yaml`**:
+
+   ```yaml
+   enabledWorkflows: [session-management, simulator, ui-automation]
+   projectPath: bearlake-client/bearlake-client.xcodeproj
+   scheme: bearlake-client
+   simulatorName: iPhone 17
+   ```
+
+   With that the server registers **36 tools**. The file is committed, so this is one-time.
+
+   `ui-automation` also depends on **`axe`** (`brew tap cameroncooke/axe && brew install axe`); it was already present here at 1.8.0. `xcodebuildmcp-doctor` reports whether it is.
+
+**Do not `pkill` these processes.** The server owns a background daemon, and killing either mid-session leaves stale socket state that makes the *next* startup hang during init — which then looks like a bad config rather than leftover state. Both times this went wrong in Phase 4, a stray `pkill` was the cause. Kill by PID, or leave them alone.
+
+##### What it can actually do — the Phase 4 manual checklist, run through it
+
+Every item that had been deferred as "manual" across Phases 3–4 was driven through the tool against the live local server. **12 of 13 verified; 1 skipped as redundant.**
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Next advances Email → Password | ✅ caret moved |
+| 2 | Go submits from Password | ✅ signed in |
+| 3 | Sign In disabled until both fields filled | ✅ absent from targets when empty, present when filled |
+| 4 | Pull-to-refresh reloads | ✅ fresh `GET /announcements` + `/events` in the server log |
+| 5 | *Older announcements* navigates | ✅ |
+| 6 | Scroll to *Load More*, tap, appends | ✅ appended #5–#3, button then vanished (cursor exhausted), no duplicates |
+| 7 | Row swipe reveals Edit + Delete | ✅ both |
+| 8 | Delete confirms, then removes | ✅ *"This can't be undone."* → row gone |
+| 9 | Edit saves and **leaves the date alone** | ✅ text changed in place, `Aug 24, 2026` unchanged |
+| 10 | `+` opens focused | ✅ caret in the box, Save greyed |
+| 11 | Cancel with text prompts to discard | ✅ *"Discard this announcement?"*, nothing created |
+| 12 | Over-length disables Save | ⏭️ **skipped, redundant** — see below |
+| 13 | ☰ → Sign Out → confirm → login | ✅ |
+
+**On 12:** injecting 5,001 characters costs far more than it proves. `validationProblem(body:)` is unit-tested at exactly 5,000 pass / 5,001 fail, and `canSave` calls that same function — wiring confirmed live, since Save was absent at 0 characters and present at 34. Only the specific over-length branch is unexercised through the UI, and it shares its implementation with the empty-string branch that *was*.
+
+The snapshots also double as a **VoiceOver audit**, which was an unexpected benefit: the tool reports elements by this app's own accessibility labels (`button|Settings`, `button|New announcement`, `text-field|Announcement text`, `Posted Aug 24, 2026. Not editable.`), and combined rows appear as one element, confirming `.accessibilityElement(children: .combine)`.
+
+Server-side confirmation of the same run: `POST /auth/logout 204`, `POST /auth/login 200`, `PATCH /announcements/… 200`, `DELETE /announcements/… 204`.
+
+##### Scrolling works — the earlier failure was self-inflicted
+
+Phase 4's first attempt concluded that vertical scrolling in a SwiftUI `List` did not work. **That was wrong.** `swipe` with `withinElementRef` on the application ref scrolls correctly, and `drag` on a row ref performs the horizontal swipe that reveals row actions. The earlier failure was a wedged daemon caused by a stray `pkill`, not a tool limitation.
+
+##### Two environment notes
+
+- **The software keyboard never appears** when the simulator has a hardware keyboard attached, so `submitLabel` text ("Next", "Go") cannot be read off a screenshot. The *behaviour* is still verifiable — press HID key 40 and observe where the caret goes — which is what matters.
+- **`type_text` injects without raising the keyboard.** Tap the field first if a check depends on the keyboard being up.
+
+##### Verdict
+
+**Keep it, and use it for every phase gate from Phase 5 on.** It closed 12 of the 13 checks that had been accumulating as manual work since Phase 3, in one pass, against a real server — including the row swipe actions and pagination that `simctl` cannot reach at all.
+
+Operational rule, learned the hard way twice: **never `pkill` these processes.** The server owns a background daemon; killing either mid-session leaves stale socket state that makes the *next* startup hang during init, which reads as a bad config rather than leftover state. Kill by PID or leave them alone.
+
+The `simctl` fallback in §8 remains correct and is still what every phase gate has actually used.
 
 **Use routinely:**
 
