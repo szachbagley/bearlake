@@ -476,9 +476,9 @@ All 25 announcements and 5 events were deleted afterwards; both collections are 
 
 Home at dark mode + `accessibility-extra-large`: text wraps, nothing clips, the admin `+` stays reachable. Simulator reset afterwards.
 
-##### Residual
+##### Residual — now closed
 
-Scrolling to the "Load More" button and tapping swipe actions are still not automatable here. The pagination and delete paths are covered by unit tests and by the probe above; **tap targets remain the manual check**.
+Scrolling to "Load More" and tapping the row swipe actions were left open here, then **closed in the same phase** once `XcodeBuildMCP` was added (C52): 12 of the 13 outstanding manual checks were driven through the real UI against the live server. See §7 for the results table. The only item not run is the 5,001-character over-length case, which is redundant with an existing unit test.
 
 
 
@@ -668,24 +668,46 @@ Project-scoped servers need approval before they load — either interactively, 
 
 **Do not `pkill` these processes.** The server owns a background daemon, and killing either mid-session leaves stale socket state that makes the *next* startup hang during init — which then looks like a bad config rather than leftover state. Both times this went wrong in Phase 4, a stray `pkill` was the cause. Kill by PID, or leave them alone.
 
-##### What it can actually do — tested in Phase 4
+##### What it can actually do — the Phase 4 manual checklist, run through it
 
-`ui-automation` exposes `snapshot-ui`, `tap`, `type-text`, `swipe`, `drag`, `gesture`, `long-press`, `key-press`, and `screenshot`. It works from **semantic snapshots with element refs**, not screen coordinates, which is the property that makes it worth having.
+Every item that had been deferred as "manual" across Phases 3–4 was driven through the tool against the live local server. **12 of 13 verified; 1 skipped as redundant.**
 
-**Confirmed working:**
+| # | Check | Result |
+|---|---|---|
+| 1 | Next advances Email → Password | ✅ caret moved |
+| 2 | Go submits from Password | ✅ signed in |
+| 3 | Sign In disabled until both fields filled | ✅ absent from targets when empty, present when filled |
+| 4 | Pull-to-refresh reloads | ✅ fresh `GET /announcements` + `/events` in the server log |
+| 5 | *Older announcements* navigates | ✅ |
+| 6 | Scroll to *Load More*, tap, appends | ✅ appended #5–#3, button then vanished (cursor exhausted), no duplicates |
+| 7 | Row swipe reveals Edit + Delete | ✅ both |
+| 8 | Delete confirms, then removes | ✅ *"This can't be undone."* → row gone |
+| 9 | Edit saves and **leaves the date alone** | ✅ text changed in place, `Aug 24, 2026` unchanged |
+| 10 | `+` opens focused | ✅ caret in the box, Save greyed |
+| 11 | Cancel with text prompts to discard | ✅ *"Discard this announcement?"*, nothing created |
+| 12 | Over-length disables Save | ⏭️ **skipped, redundant** — see below |
+| 13 | ☰ → Sign Out → confirm → login | ✅ |
 
-- `snapshot-ui` returns a labelled element tree — and it reads this app's **own accessibility labels**, so the ☰ appears as `button|Settings` and the `+` as `button|New announcement`. That doubles as a live VoiceOver check.
-- `tap --element-ref` works: tapping *Older announcements* navigated correctly.
-- Combined rows show up as one element (`Aug 24, 2026, UI check announcement #25`), confirming `.accessibilityElement(children: .combine)`.
+**On 12:** injecting 5,001 characters costs far more than it proves. `validationProblem(body:)` is unit-tested at exactly 5,000 pass / 5,001 fail, and `canSave` calls that same function — wiring confirmed live, since Save was absent at 0 characters and present at 34. Only the specific over-length branch is unexercised through the UI, and it shares its implementation with the empty-string branch that *was*.
 
-**Did not work in this environment:**
+The snapshots also double as a **VoiceOver audit**, which was an unexpected benefit: the tool reports elements by this app's own accessibility labels (`button|Settings`, `button|New announcement`, `text-field|Announcement text`, `Posted Aug 24, 2026. Not editable.`), and combined rows appear as one element, confirming `.accessibilityElement(children: .combine)`.
 
-- **Vertical scrolling inside a SwiftUI `List`.** `swipe --withinElementRef` (the only scroll ref offered was the whole application) and `gesture --preset scroll-up` both failed to move the list; the gestures registered as *horizontal tab switches* instead. So "scroll to Load More and tap it" is still unreached.
-- **Daemon stability.** `snapshot-ui` intermittently hung for 3–5 minutes and the background daemon eventually stopped creating its socket, unrecoverable by restart or `purge`. Caveat on that: the CLI was being driven directly from a shell, because **MCP servers only connect at session start** so the tools were not loadable mid-session. The MCP path — which is the configured one, and where the server owns the daemon lifecycle rather than a shell hammering it — has not yet been exercised. Judge it on that path before concluding it is unreliable.
+Server-side confirmation of the same run: `POST /auth/logout 204`, `POST /auth/login 200`, `PATCH /announcements/… 200`, `DELETE /announcements/… 204`.
+
+##### Scrolling works — the earlier failure was self-inflicted
+
+Phase 4's first attempt concluded that vertical scrolling in a SwiftUI `List` did not work. **That was wrong.** `swipe` with `withinElementRef` on the application ref scrolls correctly, and `drag` on a row ref performs the horizontal swipe that reveals row actions. The earlier failure was a wedged daemon caused by a stray `pkill`, not a tool limitation.
+
+##### Two environment notes
+
+- **The software keyboard never appears** when the simulator has a hardware keyboard attached, so `submitLabel` text ("Next", "Go") cannot be read off a screenshot. The *behaviour* is still verifiable — press HID key 40 and observe where the caret goes — which is what matters.
+- **`type_text` injects without raising the keyboard.** Tap the field first if a check depends on the keyboard being up.
 
 ##### Verdict
 
-Keep it. The semantic snapshot and tap are genuinely valuable and cover most of the residual manual surface. Two caveats carry forward: **verify it from a fresh session** (where the MCP server manages its own daemon), and **treat list scrolling as unsolved** until proven otherwise — which matters for Phase 5's calendar grid and Phase 8's article list.
+**Keep it, and use it for every phase gate from Phase 5 on.** It closed 12 of the 13 checks that had been accumulating as manual work since Phase 3, in one pass, against a real server — including the row swipe actions and pagination that `simctl` cannot reach at all.
+
+Operational rule, learned the hard way twice: **never `pkill` these processes.** The server owns a background daemon; killing either mid-session leaves stale socket state that makes the *next* startup hang during init, which reads as a bad config rather than leftover state. Kill by PID or leave them alone.
 
 The `simctl` fallback in §8 remains correct and is still what every phase gate has actually used.
 
