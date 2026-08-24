@@ -205,6 +205,41 @@ final class CalendarViewModel {
         return dates.calendar.component(.hour, from: start)
     }
 
+    // MARK: - Day actions (step 6)
+
+    /// What a tap in the day detail asked for. Phase 6 presents the editor
+    /// and the read-only detail from this; Phase 5 owns the decision of
+    /// *which*, because that is calendar logic rather than presentation.
+    enum DayAction: Equatable {
+        /// Tapping empty space: create an event on this day, pre-populated.
+        case create(dateOnly: String)
+        /// Tapping an event the viewer may change.
+        case edit(CalendarEvent)
+        /// Tapping an event the viewer may only read.
+        case view(CalendarEvent)
+    }
+
+    var pendingAction: DayAction?
+
+    func requestCreate(on dateOnly: String) {
+        pendingAction = .create(dateOnly: dateOnly)
+    }
+
+    /// Routes to the editor or the read-only detail.
+    ///
+    /// This mirrors the server's rule — admin, or the event's creator — but
+    /// it is only an affordance. The server independently rejects a PATCH or
+    /// DELETE from anyone else, so a wrong answer here is a cosmetic bug, not
+    /// a security hole (C48).
+    func requestOpen(_ event: CalendarEvent, as user: PublicUser?) {
+        pendingAction = canEdit(event, as: user) ? .edit(event) : .view(event)
+    }
+
+    func canEdit(_ event: CalendarEvent, as user: PublicUser?) -> Bool {
+        guard let user else { return false }
+        return user.isAdmin || event.createdBy == user.id
+    }
+
     // MARK: - Labels
 
     var monthLabel: String {

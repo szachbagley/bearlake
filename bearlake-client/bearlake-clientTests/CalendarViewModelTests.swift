@@ -416,3 +416,65 @@ struct CalendarGridTests {
         #expect(model.monthLabel == "December")
     }
 }
+
+// MARK: - Day actions (step 6)
+
+@MainActor
+struct DayActionTests {
+    private let admin = PublicUser.fixture(id: "admin-1", displayName: "Zach", role: .admin)
+    private let member = PublicUser.fixture(id: "member-1", displayName: "Rachel", role: .member)
+
+    @Test("tapping empty space asks to create on that day")
+    func createCarriesTheDay() {
+        let (model, _) = makeCalendar()
+        model.selectDay("2026-07-22")
+        model.requestCreate(on: model.selectedDay)
+        #expect(model.pendingAction == .create(dateOnly: "2026-07-22"))
+    }
+
+    @Test("an admin may edit anyone's event")
+    func adminEditsAnything() {
+        let (model, _) = makeCalendar()
+        let someoneElses = CalendarEvent.fixture(title: "Theirs")
+        #expect(model.canEdit(someoneElses, as: admin))
+
+        model.requestOpen(someoneElses, as: admin)
+        #expect(model.pendingAction == .edit(someoneElses))
+    }
+
+    @Test("a member may edit only their own event")
+    func memberEditsOwn() {
+        let (model, _) = makeCalendar()
+        var mine = CalendarEvent.fixture(title: "Mine")
+        mine = CalendarEvent(
+            id: mine.id, title: mine.title, notes: nil,
+            startsAt: mine.startsAt, endsAt: mine.endsAt, isAllDay: mine.isAllDay,
+            createdBy: member.id, creatorDisplayName: member.displayName,
+            createdAt: mine.createdAt, updatedAt: mine.updatedAt
+        )
+        #expect(model.canEdit(mine, as: member))
+        model.requestOpen(mine, as: member)
+        #expect(model.pendingAction == .edit(mine))
+    }
+
+    /// The affordance half of C48. The server independently rejects the
+    /// write, so this only decides which screen opens.
+    @Test("a member opening someone else's event gets the read-only view")
+    func memberViewsOthers() {
+        let (model, _) = makeCalendar()
+        let theirs = CalendarEvent.fixture(title: "Theirs")  // createdBy is the fixture's admin id
+        #expect(model.canEdit(theirs, as: member) == false)
+
+        model.requestOpen(theirs, as: member)
+        #expect(model.pendingAction == .view(theirs))
+    }
+
+    @Test("with no signed-in user nothing is editable")
+    func noUserNoEdit() {
+        let (model, _) = makeCalendar()
+        let event = CalendarEvent.fixture()
+        #expect(model.canEdit(event, as: nil) == false)
+        model.requestOpen(event, as: nil)
+        #expect(model.pendingAction == .view(event))
+    }
+}
