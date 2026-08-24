@@ -102,7 +102,7 @@ Every open or unspecified choice, resolved. Final for v1. Referenced as **C1…C
 | C49 | User management | **Not on iOS, ever.** No user list, no create, no reset. | `CLAUDE.md`: the web app is the only surface for user management. |
 | C50 | Accessibility | Dynamic Type through **XXL**, VoiceOver labels on every control, light and dark mode. Verified in the simulator at each gate, not just at the end. | `CLAUDE.md` §iOS styling. Retrofitting accessibility is far more expensive than maintaining it. |
 | C51 | Home announcement count | **Three**, matching the three upcoming events beside it. | Neither the spec nor the storyboard fixes a number — the storyboard's two is simply what fit the wireframe. |
-| C52 | UI automation | **`XcodeBuildMCP` 2.7.0**, project-scoped and version-pinned in `.mcp.json`. Semantic `snapshot-ui` + `tap`, not coordinates. | Added in Phase 4 after three phases of accumulating manual tap checks. Confirmed working for snapshot and tap; **list scrolling and daemon stability are unresolved** — see §7. The `simctl` fallback stays. |
+| C52 | UI automation | **`XcodeBuildMCP` 2.7.0**, project-scoped and version-pinned in `.mcp.json`, with `ui-automation` enabled via `.xcodebuildmcp/config.yaml`. Semantic `snapshot_ui` + `tap`, not coordinates. | Added in Phase 4 after three phases of accumulating manual tap checks. **Closed 12 of the 13 outstanding manual checks in one pass**, including the row swipe actions and pagination that `simctl` cannot reach at all. Use it for every gate from Phase 5 on; the `simctl` fallback stays for build/install/screenshot. |
 
 ---
 
