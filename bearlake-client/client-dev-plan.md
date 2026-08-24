@@ -433,6 +433,53 @@ A real member account was created to exercise the forced-change gate, then **dea
 
 **Gate:** §4 + simulator: create → edit → paginate → delete against the local API, then clean up the rows.
 
+#### Phase 4 status — ✅ COMPLETE
+
+**187 tests green, zero warnings.** Home is wired into the tab shell, replacing its placeholder.
+
+##### C51 — how many announcements Home shows
+
+Neither the spec nor the storyboard fixes a number; the storyboard's two is simply what fit the wireframe. **Three**, mirroring the "next three" events beside it.
+
+##### Verified against the live server, not just in tests
+
+The next-three rules were checked end to end with deliberately-chosen events on a real server (today was 2026-08-24):
+
+| Seeded | Expected | Result |
+|---|---|---|
+| Aug 20–23 ("ended yesterday") | hidden | ✅ |
+| Aug 22–**24** ("ends today") | **shown** — C25 inclusive end | ✅ |
+| Aug 28 timed | shown at local time | ✅ 16:00Z → 10:00 AM MDT |
+| Sep 4–7 | shown | ✅ |
+| Sep 20–22 (fourth) | hidden — capped at 3 | ✅ |
+
+The inclusive-end case is the one worth keeping: a stay through today must not vanish from Home on its own last morning.
+
+##### Gate sequence
+
+`simctl` still has no tap primitive, so create → edit → paginate → delete was run through the **real `AnnouncementsViewModel` against the live server** by a temporary probe, printing results on screen. 25 rows were seeded to force real pagination:
+
+```
+page1: 20 rows, more=true        create: ok
+page2: total 25                  edit: ok
+unique ids: 25 -> NO DUPES       postedAt unchanged: true
+exhausted: true                  delete: ok / gone after reload: true
+```
+
+`postedAt unchanged` is the one to keep an eye on — it proves the `{body}`-only update really does leave the server's timestamp alone.
+
+All 25 announcements and 5 events were deleted afterwards; both collections are back to empty. The probe is reverted and `grep` confirms no trace.
+
+##### Accessibility
+
+Home at dark mode + `accessibility-extra-large`: text wraps, nothing clips, the admin `+` stays reachable. Simulator reset afterwards.
+
+##### Residual
+
+Scrolling to the "Load More" button and tapping swipe actions are still not automatable here. The pagination and delete paths are covered by unit tests and by the probe above; **tap targets remain the manual check**.
+
+
+
 ---
 
 ### Phase 5 — Calendar month grid and day detail
