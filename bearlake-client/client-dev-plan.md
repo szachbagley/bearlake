@@ -653,6 +653,21 @@ Two setup details that cost time and are worth writing down:
 
 Project-scoped servers need approval before they load — either interactively, or via `enabledMcpjsonServers` in `.claude/settings.local.json` (gitignored, so each machine opts in itself).
 
+3. **`ui-automation` is off by default.** Out of the box the server registers **24 tools from `session-management, simulator`** — which includes `snapshot_ui` and `screenshot` but **not `tap`, `type_text`, or `swipe`**, so the interesting half is missing and it is not obvious why. Enabling it needs a project config at **`.xcodebuildmcp/config.yaml`**:
+
+   ```yaml
+   enabledWorkflows: [session-management, simulator, ui-automation]
+   projectPath: bearlake-client/bearlake-client.xcodeproj
+   scheme: bearlake-client
+   simulatorName: iPhone 17
+   ```
+
+   With that the server registers **36 tools**. The file is committed, so this is one-time.
+
+   `ui-automation` also depends on **`axe`** (`brew tap cameroncooke/axe && brew install axe`); it was already present here at 1.8.0. `xcodebuildmcp-doctor` reports whether it is.
+
+**Do not `pkill` these processes.** The server owns a background daemon, and killing either mid-session leaves stale socket state that makes the *next* startup hang during init — which then looks like a bad config rather than leftover state. Both times this went wrong in Phase 4, a stray `pkill` was the cause. Kill by PID, or leave them alone.
+
 ##### What it can actually do — tested in Phase 4
 
 `ui-automation` exposes `snapshot-ui`, `tap`, `type-text`, `swipe`, `drag`, `gesture`, `long-press`, `key-press`, and `screenshot`. It works from **semantic snapshots with element refs**, not screen coordinates, which is the property that makes it worth having.

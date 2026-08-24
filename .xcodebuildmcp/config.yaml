@@ -1,0 +1,15 @@
+# XcodeBuildMCP project configuration (C52).
+#
+# Only the `simulator` and `session-management` workflows load by default, so
+# tap / type_text / swipe are absent and only snapshot_ui and screenshot are
+# available. `ui-automation` is what makes the per-phase gate checks
+# automatable rather than a manual tap-through.
+enabledWorkflows:
+  - session-management
+  - simulator
+  - ui-automation
+
+# Saves passing these on every call.
+projectPath: bearlake-client/bearlake-client.xcodeproj
+scheme: bearlake-client
+simulatorName: iPhone 17
