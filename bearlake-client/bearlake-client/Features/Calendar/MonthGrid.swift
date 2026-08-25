@@ -12,7 +12,7 @@ struct MonthGrid: View {
     let selectedDay: String
     let today: String
     let hasEvents: (String) -> Bool
-    let onSelect: (String) -> Void
+    let onSelect: @MainActor (String) -> Void
 
     /// Sunday-start, matching `CabinDate`'s `firstWeekday = 1`.
     private let weekdaySymbols = ["S", "M", "T", "W", "T", "F", "S"]

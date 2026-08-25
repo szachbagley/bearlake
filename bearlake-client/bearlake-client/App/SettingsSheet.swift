@@ -12,7 +12,7 @@ import SwiftUI
 /// permanently (C49), so there is nothing else to put here.
 struct SettingsSheet: View {
     let auth: AuthViewModel
-    var onClose: () -> Void = {}
+    var onClose: @MainActor () -> Void = {}
 
     @State private var isChangingPassword = false
     @State private var isConfirmingSignOut = false

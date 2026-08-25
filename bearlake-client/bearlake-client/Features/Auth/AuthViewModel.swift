@@ -153,7 +153,7 @@ final class AuthViewModel {
 
     /// Client-side checks that spare a round trip. The server enforces these
     /// too, plus a common-password list this app has no copy of.
-    static func validate(new: String, confirmation: String) -> String? {
+    nonisolated static func validate(new: String, confirmation: String) -> String? {
         if new.count < Limits.passwordMin {
             return "Your new password must be at least \(Limits.passwordMin) characters."
         }

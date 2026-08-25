@@ -23,7 +23,7 @@ struct ChangePasswordView: View {
     let auth: AuthViewModel
     let mode: Mode
     /// Called after a successful voluntary change so the sheet can close.
-    var onFinished: () -> Void = {}
+    var onFinished: @MainActor () -> Void = {}
 
     @State private var currentPassword = ""
     @State private var newPassword = ""
