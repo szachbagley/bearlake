@@ -668,7 +668,7 @@ Quick tips hold gate codes and key locations. There is **no logging of any kind 
 
 **Gate:** §4 + simulator: render a real article containing all five block types (author it in the web app first), confirm the image loads and the video plays inline.
 
-#### Phase 8 status — 🟡 COMPLETE except one gate item
+#### Phase 8 status — ✅ COMPLETE
 
 **300 tests green, zero warnings.** The renderer replaces Phase 7's placeholder. A real five-block article renders correctly against the live server.
 
@@ -690,21 +690,21 @@ This is the kind of failure that is invisible to unit tests and to a code read: 
 | admin edit control | ✅ present for an admin |
 | dark mode + Dynamic Type XXL | ✅ wraps, no clipping, bullets stay aligned |
 
-##### ⛔ Outstanding: "confirm the image loads"
+##### The image gate item — closed, after two config bugs
 
-The one gate item not met. The article's image block renders its **failure** path correctly, which is itself a required test — but the success path has not been seen end to end, because the key points at an object that does not exist and `aws s3 cp` refused with **"Your session has expired. Please reauthenticate using 'aws login'."**
+"Confirm the image loads" took three attempts and turned up two real problems in the **local server config**:
 
-The local server *does* presign successfully (it finds ambient credentials), so only the upload is blocked. To close this:
+1. **`aws s3 cp` failed** — the AWS session had expired. Resolved by `aws login`.
+2. **The bucket in `.env` did not exist.** It read `bearlake-media` / `us-west-2`; the real bucket is **`bearlake-media-prod` / `us-east-1`** (confirmed against `docs/deploy-smoke-2026-08-07.md`). Both the name and the region were wrong.
+3. **The server was emitting a stub URL.** `isS3Configured()` requires bucket, region, **and both AWS keys** to be non-empty in the environment — it does not use ambient credentials. With the keys blank it silently fell back to `https://images.invalid/{key}`, which is why an earlier check saw `url=PRESENT` and concluded S3 worked. It did not.
 
-1. Run `aws login` (or `aws sso login`).
-2. Re-seed the article, upload a small PNG to the block's key, and view it.
-3. Delete the object afterwards (C44 — test objects are cleaned up).
+So **local dev had never been able to serve a real image**, and the failure was invisible: the API returned a URL-shaped string and the client dutifully failed to load it.
 
-Not worth blocking the phase on: the loading path is covered by seven `ImageCache` tests including the key-not-URL behaviour, and the failure path is verified in the real UI.
+Fixed by pointing local `.env` at the production bucket and copying the **scoped** `bearlake-server` IAM credentials out of Railway (`s3:PutObject`/`s3:GetObject` on `articles/*` only — not root). `.env` is gitignored. Verified: `image_urls_resolver resolver=s3`, the presigned GET returned **HTTP 200, 4101 bytes, image/png**, and the photo rendered in the app above its caption.
 
+Test object deleted afterwards (C44); the bucket is empty again.
 
-
----
+**Carry forward to Phase 9,** which builds the upload pipeline: local S3 now works, and `isS3Configured()` failing open to a stub URL is worth remembering — an upload that appears to succeed against a stub proves nothing.
 
 ### Phase 9 — Article editor (admin) and image upload
 
