@@ -108,7 +108,7 @@ struct DayDetailView: View {
             ForEach(0..<24, id: \.self) { hour in
                 HourRow(
                     hour: hour,
-                    label: hourLabel(hour),
+                    label: model.hourLabel(hour),
                     events: timed.filter { model.hourRow(for: $0) == hour },
                     onCreate: { onCreate(model.selectedDay) },
                     onOpen: onOpen
@@ -117,22 +117,6 @@ struct DayDetailView: View {
         }
     }
 
-    /// 12am … 11pm, matching the storyboard. Built from the injected calendar
-    /// so a 24-hour locale renders correctly.
-    private func hourLabel(_ hour: Int) -> String {
-        var components = DateComponents()
-        components.year = 2026
-        components.month = 1
-        components.day = 1
-        components.hour = hour
-        guard let date = model.dates.calendar.date(from: components) else { return "" }
-        let formatter = DateFormatter()
-        formatter.calendar = model.dates.calendar
-        formatter.timeZone = model.dates.timeZone
-        formatter.locale = model.dates.calendar.locale ?? .current
-        formatter.setLocalizedDateFormatFromTemplate("j")
-        return formatter.string(from: date)
-    }
 }
 
 private struct HourRow: View {
