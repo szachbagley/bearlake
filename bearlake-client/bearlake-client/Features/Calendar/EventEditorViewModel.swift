@@ -235,6 +235,45 @@ final class EventEditorViewModel {
         return .timed(start: start, end: end)
     }
 
+    // MARK: - Display
+    //
+    // Formatting lives here rather than in the view: a `body` must not do
+    // date math (CLAUDE.md), and the view has no business holding a
+    // `Calendar`.
+
+    func dayLabel(_ dateOnly: String) -> String {
+        guard let components = dates.components(fromDateOnly: dateOnly),
+              let date = dates.calendar.date(from: components)
+        else { return dateOnly }
+        return dates.dateLabel(from: date)
+    }
+
+    func timeLabel(_ time: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = dates.calendar
+        formatter.timeZone = dates.timeZone
+        formatter.locale = dates.calendar.locale ?? .current
+        formatter.timeStyle = .short
+        formatter.dateStyle = .none
+        return formatter.string(from: time)
+    }
+
+    /// `DatePicker` needs a `Date`; the string stays authoritative.
+    ///
+    /// The value is converted only to show the picker, and the picker's
+    /// result is turned straight back into a string, so nothing downstream
+    /// ever sees the intermediate `Date` (C22).
+    func date(forDay dateOnly: String) -> Date {
+        guard let components = dates.components(fromDateOnly: dateOnly),
+              let date = dates.calendar.date(from: components)
+        else { return Date() }
+        return date
+    }
+
+    func dayString(from date: Date) -> String {
+        dates.dateOnlyString(from: date)
+    }
+
     // MARK: - Save and delete
 
     /// - Returns: the saved event, or nil if it failed.

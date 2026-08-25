@@ -210,7 +210,18 @@ final class CalendarViewModel {
     /// What a tap in the day detail asked for. Phase 6 presents the editor
     /// and the read-only detail from this; Phase 5 owns the decision of
     /// *which*, because that is calendar logic rather than presentation.
-    enum DayAction: Equatable {
+    enum DayAction: Equatable, Identifiable {
+        /// `.sheet(item:)` needs an identity. The day or event id is the
+        /// natural one, and it also means re-tapping the same event does not
+        /// rebuild the sheet.
+        var id: String {
+            switch self {
+            case .create(let dateOnly): return "create-\(dateOnly)"
+            case .edit(let event): return "edit-\(event.id)"
+            case .view(let event): return "view-\(event.id)"
+            }
+        }
+
         /// Tapping empty space: create an event on this day, pre-populated.
         case create(dateOnly: String)
         /// Tapping an event the viewer may change.

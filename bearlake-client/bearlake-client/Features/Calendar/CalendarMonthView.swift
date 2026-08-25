@@ -11,8 +11,11 @@ struct CalendarMonthView: View {
     let auth: AuthViewModel
     @State private var model: CalendarViewModel
 
+    private let api: BearLakeAPI
+
     init(auth: AuthViewModel, api: BearLakeAPI) {
         self.auth = auth
+        self.api = api
         _model = State(initialValue: CalendarViewModel(api: api))
     }
 
@@ -62,6 +65,14 @@ struct CalendarMonthView: View {
             await model.loadIfNeeded()
         }
         .refreshable { await model.load() }
+        // One sheet driven by the DayAction the ViewModel produced in
+        // Phase 5, so this view never re-decides who may edit what.
+        .sheet(item: Binding(
+            get: { model.pendingAction },
+            set: { model.pendingAction = $0 }
+        )) { action in
+            editorSheet(for: action)
+        }
         .alert(
             "Something went wrong",
             isPresented: Binding(
@@ -73,6 +84,38 @@ struct CalendarMonthView: View {
             Button("Try Again") { Task { await model.load() } }
         } message: {
             Text(model.errorMessage ?? "")
+        }
+    }
+
+    @ViewBuilder
+    private func editorSheet(for action: CalendarViewModel.DayAction) -> some View {
+        switch action {
+        case .create(let dateOnly):
+            EventEditorView(
+                mode: .create(dateOnly: dateOnly),
+                api: api,
+                dates: model.dates,
+                onFinished: { saved in
+                    model.pendingAction = nil
+                    if saved != nil { Task { await model.load() } }
+                }
+            )
+        case .edit(let event):
+            EventEditorView(
+                mode: .edit(event),
+                api: api,
+                dates: model.dates,
+                onFinished: { saved in
+                    model.pendingAction = nil
+                    if saved != nil { Task { await model.load() } }
+                },
+                onDeleted: { _ in
+                    model.pendingAction = nil
+                    Task { await model.load() }
+                }
+            )
+        case .view(let event):
+            EventDetailView(event: event, rangeLabel: model.rangeLabel(for: event))
         }
     }
 
