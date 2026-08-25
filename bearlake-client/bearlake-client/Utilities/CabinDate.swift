@@ -260,6 +260,42 @@ struct CabinDate: Sendable {
         return Self.dateOnlyString(year: year, month: month, day: min(day, count))
     }
 
+    // MARK: - Combining a day with a time
+
+    /// Combines a `YYYY-MM-DD` day with a time-of-day into an instant, in
+    /// this instance's zone.
+    ///
+    /// This is the only place the two halves meet. The day stays a string
+    /// right up to here (C22), and `Calendar` — not arithmetic — resolves the
+    /// result, so a DST transition is handled by the system rather than by us
+    /// guessing an offset.
+    ///
+    /// On a spring-forward morning the wall-clock hour 02:30 does not exist;
+    /// `Calendar` returns the next valid instant rather than nil, which is
+    /// the behaviour a user expects from a time picker.
+    func instant(day: String, timeOfDay: Date) -> Date? {
+        guard let dayParts = parts(ofDateOnly: day) else { return nil }
+        let time = calendar.dateComponents([.hour, .minute], from: timeOfDay)
+        var components = DateComponents()
+        components.year = dayParts.year
+        components.month = dayParts.month
+        components.day = dayParts.day
+        components.hour = time.hour
+        components.minute = time.minute
+        return calendar.date(from: components)
+    }
+
+    /// A time-of-day anchored on an arbitrary date, for a picker binding.
+    func timeOfDay(hour: Int, minute: Int = 0) -> Date {
+        var components = DateComponents()
+        components.year = 2000
+        components.month = 1
+        components.day = 1
+        components.hour = hour
+        components.minute = minute
+        return calendar.date(from: components) ?? Date(timeIntervalSince1970: 0)
+    }
+
     // MARK: - Upcoming
 
     /// Whether an event is finished as of `now`.
