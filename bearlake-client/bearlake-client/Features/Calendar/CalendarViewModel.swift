@@ -262,6 +262,24 @@ final class CalendarViewModel {
         return names[displayedMonth - 1]
     }
 
+    /// 12am … 11pm for the hour column. Built from the injected calendar so a
+    /// 24-hour locale renders correctly, and kept here rather than in the
+    /// view so no `body` holds a `DateFormatter`.
+    func hourLabel(_ hour: Int) -> String {
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 1
+        components.day = 1
+        components.hour = hour
+        guard let date = dates.calendar.date(from: components) else { return "" }
+        let formatter = DateFormatter()
+        formatter.calendar = dates.calendar
+        formatter.timeZone = dates.timeZone
+        formatter.locale = dates.calendar.locale ?? .current
+        formatter.setLocalizedDateFormatFromTemplate("j")
+        return formatter.string(from: date)
+    }
+
     var selectedDayLabel: String {
         guard let components = dates.components(fromDateOnly: selectedDay),
               let date = dates.calendar.date(from: components)

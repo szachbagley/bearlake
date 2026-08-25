@@ -550,6 +550,41 @@ The destinations (Create/Edit Event, Event Detail) are Phase 6 views. The **rout
 
 **Gate:** §4 + simulator: create one all-day and one timed event, confirm both land on the right days, survive relaunch, then delete them.
 
+#### Phase 6 status — ✅ COMPLETE
+
+**258 tests green, zero warnings.** The whole gate was driven through the real UI with XcodeBuildMCP.
+
+##### Both shapes verified end to end, including on the wire
+
+Created through the editor, then read back from the server:
+
+```
+'Phase 6 all-day stay'   isAllDay=true   startsAt='2026-08-24'  endsAt='2026-08-28'
+'Phase 6 timed event'    isAllDay=false  startsAt='2026-08-24T16:00:00.000Z'
+```
+
+The all-day event stored **date-only strings** with an inclusive end, and flagged all five days 24–28 in the grid. The timed event stored an **instant** — `16:00Z`, correct for 10:00 MDT — and landed in the 10 AM row rather than being pinned. That is C22 and C24 confirmed against a real server rather than only in tests.
+
+##### The gate sequence
+
+| Step | Result |
+|---|---|
+| `+` pre-populates the selected day | ✅ Aug 24, default 10–11 slot |
+| Save disabled until valid | ✅ absent from targets, with *"An event needs a title."* shown |
+| All-day on → times disappear | ✅ `Starts, Aug 24, 2026` with no time, plus the inclusive-end footer |
+| Inline picker under the field | ✅ opened beneath *Ends*, showed no time picker while all-day |
+| Both survive relaunch | ✅ |
+| Delete only in edit mode, behind a confirmation | ✅ *"This can't be undone."* |
+| After delete, the days clear | ✅ 25–28 unflagged, the timed event untouched |
+
+The relaunch also confirmed a Phase 4 rule incidentally: the timed event had already ended, so Home's *Upcoming* correctly omitted it while still showing the stay that runs through the 28th.
+
+##### One accessibility gap, accepted
+
+Tapping empty space in the hour column creates an event, but that target is not exposed to VoiceOver — it is a bare tap area with no label. The `+` in the day-detail header does the same job and **is** labelled, so the shortcut is a convenience for sighted touch users and the accessible path exists. Recorded rather than fixed, because giving 24 empty rows accessibility labels would make VoiceOver read the whole column.
+
+
+
 ---
 
 ### Phase 7 — Information: quick tips, categories, article lists
