@@ -45,6 +45,9 @@ actor FakeAPI: BearLakeAPI {
     }
 
     func setNextError(_ error: APIError?) { nextError = error }
+    func setArticleSummaries(_ categoryID: String, _ summaries: [ArticleSummary]) {
+        articleSummaries[categoryID] = summaries
+    }
     func callCount(_ name: String) -> Int { callCounts[name] ?? 0 }
 
     private func record(_ name: String) throws {
