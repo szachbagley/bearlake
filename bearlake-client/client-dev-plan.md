@@ -499,6 +499,39 @@ Scrolling to "Load More" and tapping the row swipe actions were left open here, 
 
 **Gate:** §4 + simulator: navigate months and years, confirm the selection rules by eye, confirm a multi-day event spans correctly.
 
+#### Phase 5 status — ✅ COMPLETE
+
+**228 tests green, zero warnings.** Calendar replaces its placeholder in the tab shell.
+
+##### First gate driven entirely by XcodeBuildMCP (C52) — and it earned its place
+
+No temporary probe this time. The whole walkthrough was real taps on the real UI against the live server, and it **found three defects that unit tests could not**:
+
+1. **"Year, Year".** The year picker read its label twice to VoiceOver — `Picker("Year", …)` already supplies one, and `.accessibilityLabel("Year")` added a second. Only visible in a semantic snapshot.
+2. **The day detail's scroll area ran under the floating tab bar.** The hour column had its own `ScrollView` nested inside the page, so on a phone it got a ~150 pt strip whose lower half was unreachable — a swipe near the bottom **switched tabs instead of scrolling**. Two scroll views on the same axis was the wrong shape; the page now owns a single one and the grid scrolling away is fine.
+3. **The month grid broke at Dynamic Type XXL.** Day numbers truncated to `…`, "29" wrapped to two lines, and the year picker overlapped the weekday header. Fixed with `@ScaledMetric` cells plus `minimumScaleFactor` as the safety valve — seven columns cannot grow without bound on a phone, and a day number that reads "…" is useless — and by removing the header's reserved width.
+
+The third is the one worth remembering: **it is invisible at default text size**, so nothing short of an accessibility pass catches it. C50 exists for exactly this.
+
+##### Verified in the live UI
+
+| | |
+|---|---|
+| Today marked | ✅ `24, today` |
+| Month change → 1st | ✅ header "September 2026", detail "Sep 1, 2026" |
+| Multi-day span | ✅ 16, 17, 18, 19, 20 all flagged for a Jul 16–20 stay |
+| Span across a month boundary | ✅ Jul 30, 31 **and** Aug 1, 2, 3 |
+| ±1 month buffer | ✅ July padding days show events while August is displayed |
+| Pinned above the column | ✅ the stay, with an inclusive `Jul 16 – Jul 20` label |
+| Timed events at local hours | ✅ 16:00Z → **10 AM**, 23:00Z → **5 PM** in Denver |
+| Full 24-hour column reachable | ✅ 12 AM through 11 PM after the scroll fix |
+
+##### Step 6
+
+The destinations (Create/Edit Event, Event Detail) are Phase 6 views. The **routing decision** is implemented and tested here as a `DayAction` enum, with `canEdit` mirroring the server's admin-or-creator rule. Phase 6 presents screens from that state rather than re-deriving who may edit what.
+
+
+
 ---
 
 ### Phase 6 — Create / Edit Event and Event Detail

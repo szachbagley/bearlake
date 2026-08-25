@@ -223,6 +223,43 @@ struct CabinDate: Sendable {
         }
     }
 
+    // MARK: - Month arithmetic
+
+    /// The first instant of a month, for building fetch windows.
+    func startOfMonth(year: Int, month: Int) -> Date? {
+        var components = DateComponents()
+        components.year = year
+        components.month = month
+        components.day = 1
+        return calendar.date(from: components)
+    }
+
+    /// How many days a month has. Used to clamp a day when moving between
+    /// months or years — Jan 31 has no counterpart in February.
+    func dayCount(year: Int, month: Int) -> Int? {
+        guard let start = startOfMonth(year: year, month: month) else { return nil }
+        return calendar.range(of: .day, in: .month, for: start)?.count
+    }
+
+    /// Splits a `YYYY-MM-DD` string into its parts, or nil if it is not a real
+    /// date. Wraps `components(fromDateOnly:)` for the common case.
+    func parts(ofDateOnly value: String) -> (year: Int, month: Int, day: Int)? {
+        guard let components = components(fromDateOnly: value),
+              let year = components.year,
+              let month = components.month,
+              let day = components.day
+        else { return nil }
+        return (year, month, day)
+    }
+
+    /// Builds a date-only string, clamping the day to the target month's
+    /// length. Moving from 2028-02-29 to 2026 lands on 2026-02-28, not on
+    /// an invalid date or silently on March 1.
+    func dateOnly(year: Int, month: Int, clampingDay day: Int) -> String? {
+        guard let count = dayCount(year: year, month: month) else { return nil }
+        return Self.dateOnlyString(year: year, month: month, day: min(day, count))
+    }
+
     // MARK: - Upcoming
 
     /// Whether an event is finished as of `now`.

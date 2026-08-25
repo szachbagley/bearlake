@@ -24,9 +24,12 @@ struct RootTabView: View {
 
     var body: some View {
         TabView(selection: $selection) {
-            placeholder(title: "Calendar", symbol: "calendar")
-                .tabItem { Label("Calendar", systemImage: "calendar") }
-                .tag(Tab.calendar)
+            NavigationStack {
+                CalendarMonthView(auth: auth, api: api)
+                    .toolbar { settingsToolbarItem }
+            }
+            .tabItem { Label("Calendar", systemImage: "calendar") }
+            .tag(Tab.calendar)
 
             NavigationStack {
                 HomeView(auth: auth, api: api)
