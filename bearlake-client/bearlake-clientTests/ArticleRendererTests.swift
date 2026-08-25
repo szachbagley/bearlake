@@ -205,6 +205,27 @@ struct VideoBlockRenderTests {
         #expect(YouTube.embedURL(forID: "not-valid") == nil)
         #expect(YouTube.embedURL(forID: "") == nil)
     }
+
+    /// Regression: loading the embed URL straight into a WKWebView gives the
+    /// iframe no origin, and YouTube refuses with "Error 153 — video player
+    /// configuration error". The player has to be hosted in a page served
+    /// from a real base URL.
+    @Test("the player is wrapped in a host page, not loaded as a bare URL")
+    func embedIsHostedInAPage() throws {
+        let html = try #require(YouTube.embedHTML(forID: "dQw4w9WgXcQ"))
+        #expect(html.contains("<iframe"), "the player must be an iframe in a page")
+        #expect(html.contains("youtube-nocookie.com/embed/dQw4w9WgXcQ"))
+        // playsinline keeps playback in place rather than handing the whole
+        // screen to the system player.
+        #expect(html.contains("playsinline=1"))
+        #expect(YouTube.embedBaseURL?.host() == "www.youtube-nocookie.com",
+                "the base URL is what gives the iframe its origin")
+    }
+
+    @Test("an invalid id produces no host page either")
+    func invalidIDNoHTML() {
+        #expect(YouTube.embedHTML(forID: "nope") == nil)
+    }
 }
 
 // MARK: - Loading failures

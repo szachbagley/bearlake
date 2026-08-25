@@ -20,8 +20,8 @@ struct VideoBlockView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            if let url = YouTube.embedURL(forID: videoID) {
-                YouTubeWebView(url: url)
+            if let html = YouTube.embedHTML(forID: videoID) {
+                YouTubeWebView(html: html)
                     .aspectRatio(16 / 9, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .accessibilityLabel(caption.map { "Video: \($0)" } ?? "Video")
@@ -44,7 +44,7 @@ struct VideoBlockView: View {
 
 /// The `WKWebView` wrapper. Deliberately tiny.
 private struct YouTubeWebView: UIViewRepresentable {
-    let url: URL
+    let html: String
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -64,9 +64,18 @@ private struct YouTubeWebView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         // Guard against reloading on every layout pass, which would restart
-        // playback.
-        guard webView.url != url else { return }
-        webView.load(URLRequest(url: url))
+        // playback from the beginning.
+        guard context.coordinator.loadedHTML != html else { return }
+        context.coordinator.loadedHTML = html
+        webView.loadHTMLString(html, baseURL: YouTube.embedBaseURL)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    /// Remembers what was loaded, since `loadHTMLString` leaves `webView.url`
+    /// as the base URL and cannot be compared against.
+    final class Coordinator {
+        var loadedHTML: String?
     }
 }
 
