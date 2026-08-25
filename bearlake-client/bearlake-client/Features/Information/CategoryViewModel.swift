@@ -45,7 +45,15 @@ final class CategoryViewModel {
         }
     }
 
-    static func titleProblem(_ title: String) -> String? {
+    /// `nonisolated` deliberately.
+    ///
+    /// The enclosing class is `@MainActor`, so without this the function
+    /// inherits that isolation — and storing it in a plain
+    /// `(String) -> String?` property erases the isolation rather than
+    /// preserving it. Calling it from an async context then crashed with a
+    /// bus error inside `trimmingCharacters`. A pure string check has no
+    /// business being actor-isolated in the first place.
+    nonisolated static func titleProblem(_ title: String) -> String? {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.count < Limits.articleTitleMin { return "An article needs a title." }
         if trimmed.count > Limits.articleTitleMax { return "That title is too long." }

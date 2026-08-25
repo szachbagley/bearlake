@@ -9,10 +9,10 @@ import SwiftUI
 /// **Delete Event**; create mode never shows it.
 struct EventEditorView: View {
     @State private var model: EventEditorViewModel
-    var onFinished: (CalendarEvent?) -> Void
+    var onFinished: @MainActor (CalendarEvent?) -> Void
     /// Distinct from `onFinished` so the caller can drop a deleted event from
     /// its list rather than merging it back in.
-    var onDeleted: (String) -> Void = { _ in }
+    var onDeleted: @MainActor (String) -> Void = { _ in }
 
     @State private var isConfirmingDiscard = false
     @State private var isConfirmingDelete = false
@@ -22,8 +22,8 @@ struct EventEditorView: View {
         mode: EventEditorViewModel.Mode,
         api: BearLakeAPI,
         dates: CabinDate = CabinDate(),
-        onFinished: @escaping (CalendarEvent?) -> Void,
-        onDeleted: @escaping (String) -> Void = { _ in }
+        onFinished: @escaping @MainActor (CalendarEvent?) -> Void,
+        onDeleted: @escaping @MainActor (String) -> Void = { _ in }
     ) {
         _model = State(initialValue: EventEditorViewModel(mode: mode, api: api, dates: dates))
         self.onFinished = onFinished

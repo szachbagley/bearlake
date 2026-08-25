@@ -38,27 +38,15 @@ struct RootTabView: View {
             .tabItem { Label("Home", systemImage: "house.fill") }
             .tag(Tab.home)
 
-            placeholder(title: "Information", symbol: "lightbulb.fill")
-                .tabItem { Label("Information", systemImage: "lightbulb.fill") }
-                .tag(Tab.information)
+            NavigationStack {
+                InformationView(auth: auth, api: api)
+                    .toolbar { settingsToolbarItem }
+            }
+            .tabItem { Label("Information", systemImage: "lightbulb.fill") }
+            .tag(Tab.information)
         }
         .sheet(isPresented: $isShowingSettings) {
             SettingsSheet(auth: auth) { isShowingSettings = false }
-        }
-    }
-
-    /// Phase 3 ships the shell; Phases 4–9 replace these with the real
-    /// screens. Each keeps the ☰ control so the settings path is reachable
-    /// and testable now.
-    private func placeholder(title: String, symbol: String) -> some View {
-        NavigationStack {
-            ContentUnavailableView(
-                title,
-                systemImage: symbol,
-                description: Text("Coming in a later phase.")
-            )
-            .navigationTitle(title)
-            .toolbar { settingsToolbarItem }
         }
     }
 

@@ -15,7 +15,7 @@ struct EventDetailView: View {
     let event: CalendarEvent
     let rangeLabel: String
     /// Non-nil only when the viewer may edit.
-    var onEdit: (() -> Void)?
+    var onEdit: (@MainActor () -> Void)?
 
     var body: some View {
         NavigationStack {

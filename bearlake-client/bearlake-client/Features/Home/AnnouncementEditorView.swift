@@ -20,7 +20,7 @@ struct AnnouncementDraft: Identifiable {
 struct AnnouncementEditorView: View {
     let api: BearLakeAPI
     let draft: AnnouncementDraft
-    var onFinished: (Announcement?) -> Void
+    var onFinished: @MainActor (Announcement?) -> Void
 
     @State private var text: String
     @State private var isSaving = false
@@ -30,7 +30,7 @@ struct AnnouncementEditorView: View {
 
     private let dates = CabinDate()
 
-    init(api: BearLakeAPI, draft: AnnouncementDraft, onFinished: @escaping (Announcement?) -> Void) {
+    init(api: BearLakeAPI, draft: AnnouncementDraft, onFinished: @escaping @MainActor (Announcement?) -> Void) {
         self.api = api
         self.draft = draft
         self.onFinished = onFinished

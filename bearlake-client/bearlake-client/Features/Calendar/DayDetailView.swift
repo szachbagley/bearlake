@@ -12,8 +12,8 @@ struct DayDetailView: View {
     let model: CalendarViewModel
     /// Tapping empty space in the column creates an event on this day
     /// (Phase 6 supplies the editor).
-    var onCreate: (String) -> Void = { _ in }
-    var onOpen: (CalendarEvent) -> Void = { _ in }
+    var onCreate: @MainActor (String) -> Void = { _ in }
+    var onOpen: @MainActor (CalendarEvent) -> Void = { _ in }
 
     private var dayEvents: [CalendarEvent] { model.events(on: model.selectedDay) }
     private var pinned: [CalendarEvent] { dayEvents.filter { model.isPinned($0) } }
@@ -111,7 +111,9 @@ struct DayDetailView: View {
                     label: model.hourLabel(hour),
                     events: timed.filter { model.hourRow(for: $0) == hour },
                     onCreate: { onCreate(model.selectedDay) },
-                    onOpen: onOpen
+                    // Re-formed rather than passed through: forwarding the
+                    // property directly widens it to @Sendable and warns.
+                    onOpen: { onOpen($0) }
                 )
             }
         }
@@ -123,8 +125,8 @@ private struct HourRow: View {
     let hour: Int
     let label: String
     let events: [CalendarEvent]
-    let onCreate: () -> Void
-    let onOpen: (CalendarEvent) -> Void
+    let onCreate: @MainActor () -> Void
+    let onOpen: @MainActor (CalendarEvent) -> Void
 
     /// The time gutter has to grow with the text. At a fixed width the label
     /// wrapped mid-word at accessibility sizes — "1 A / M" — which is worse

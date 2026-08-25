@@ -111,7 +111,7 @@ final class AnnouncementsViewModel {
     /// Lives here rather than inside the editor view so it is testable
     /// without rendering: the point of the check is that an over-length body
     /// never reaches the network, and that has to be provable.
-    static func validationProblem(body: String) -> String? {
+    nonisolated static func validationProblem(body: String) -> String? {
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.count < Limits.announcementBodyMin {
             return "An announcement needs some text."

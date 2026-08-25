@@ -60,7 +60,7 @@ final class InformationViewModel {
     ///
     /// A static so the editor's Save button and the tests call the same
     /// function and cannot drift apart.
-    static func quickTipProblem(body: String) -> String? {
+    nonisolated static func quickTipProblem(body: String) -> String? {
         let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.count < Limits.quickTipBodyMin { return "A quick tip needs some text." }
         if body.count > Limits.quickTipBodyMax {
@@ -112,7 +112,7 @@ final class InformationViewModel {
 
     // MARK: - Categories
 
-    static func categoryProblem(title: String) -> String? {
+    nonisolated static func categoryProblem(title: String) -> String? {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.count < Limits.categoryTitleMin { return "A category needs a name." }
         if trimmed.count > Limits.categoryTitleMax { return "That name is too long." }

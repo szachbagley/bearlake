@@ -602,6 +602,54 @@ Tapping empty space in the hour column creates an event, but that target is not 
 
 **Gate:** §4 + simulator walkthrough of both sections.
 
+#### Phase 7 status — ✅ COMPLETE
+
+**278 tests green, zero warnings.** All three tabs are now real; `RootTabView`'s placeholder helper is deleted.
+
+##### A crash the tests could not have caught
+
+Tapping **Save** in the new-article sheet crashed the app — a bus error deep inside `trimmingCharacters`:
+
+```
+swift_retain ← initializeBufferWithCopyOfBuffer for Character
+             ← trimmingCharacters ← CategoryViewModel.titleProblem
+             ← createDraft ← TextEntrySheet.save()
+```
+
+**Cause.** `TextEntrySheet` stored its callbacks as plain function types:
+
+```swift
+let validate: (String) -> String?
+let onSave: (String) async -> Bool
+```
+
+The closures passed in capture `@MainActor` ViewModels and are therefore MainActor-isolated, but those property types are **not** — storing them there *erases* the isolation rather than preserving it. Swift 5 mode does not diagnose it, and the runtime then invokes them from the wrong context. Marking the property types `@MainActor` fixed it, verified by re-running the exact tap that crashed.
+
+**A wrong first attempt is worth recording too.** The backtrace pointed at `titleProblem`, so the first fix marked that `nonisolated`. It rebuilt, reinstalled, and crashed identically — the isolation was being erased at the *property*, not at the function. `nonisolated` on those pure string checks is still correct and was kept, but it was not the bug.
+
+**Swept the same pattern.** Eleven other stored closure properties across Auth, Home, and Calendar had the identical shape. All are now `@MainActor`. They are synchronous and called from `body`, so none had crashed — but the shape is the one that just did.
+
+**Two lessons for the remaining phases:**
+
+1. **Any stored closure property on a `View` must be `@MainActor`.** Not a style preference — an un-annotated one silently erases isolation.
+2. This entire class is a **compile-time error under Swift 6 strict concurrency**, which C2 defers. That deferral now has a measured cost: one shipped crash, found only because a UI walkthrough tapped the button. Worth revisiting after v1 with this as evidence.
+
+##### Verified in the live UI
+
+| | |
+|---|---|
+| Quick tips and categories render with admin `+` | ✅ |
+| Draft badge (C38) | ✅ published unbadged, draft badged, both shown to an admin |
+| Draft-first article creation | ✅ *"Phase 7 new article, Draft"* appears immediately |
+| `CATEGORY_NOT_EMPTY` (409) | ✅ *"Move or delete this category's articles before deleting it."* — the server's exact words, not a generic failure |
+| Every delete confirms first | ✅ |
+
+##### Step 6 — sensitive bodies
+
+Quick tips hold gate codes and key locations. There is **no logging of any kind in the app target** (grep-verified since Phase 2), so there is nothing to redact; the requirement is met by construction rather than by a redaction rule that could be forgotten.
+
+
+
 ---
 
 ### Phase 8 — Article renderer
