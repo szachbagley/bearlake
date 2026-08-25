@@ -45,6 +45,7 @@ actor FakeAPI: BearLakeAPI {
     }
 
     func setNextError(_ error: APIError?) { nextError = error }
+    func setArticle(_ article: InfoArticle) { articles[article.id] = article }
     func setArticleSummaries(_ categoryID: String, _ summaries: [ArticleSummary]) {
         articleSummaries[categoryID] = summaries
     }

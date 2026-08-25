@@ -36,8 +36,10 @@ struct CategoryView: View {
 
             ForEach(model.articles) { article in
                 NavigationLink {
-                    // Phase 8 supplies the renderer.
-                    ArticlePlaceholderView(title: article.title)
+                    ArticleView(
+                        auth: auth, api: api,
+                        articleID: article.id, title: article.title
+                    )
                 } label: {
                     HStack {
                         Text(article.title)
@@ -126,21 +128,6 @@ struct CategoryView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
-    }
-}
-
-/// Stands in until Phase 8's renderer lands.
-struct ArticlePlaceholderView: View {
-    let title: String
-
-    var body: some View {
-        ContentUnavailableView(
-            title,
-            systemImage: "doc.text",
-            description: Text("The article renderer arrives in the next phase.")
-        )
-        .navigationTitle(title)
-        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
