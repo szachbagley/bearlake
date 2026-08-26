@@ -47,6 +47,40 @@ enum YouTube {
         return URL(string: "https://www.youtube-nocookie.com/embed/\(id)")
     }
 
+    /// The origin the embed page is served from.
+    ///
+    /// Loading the embed URL straight into a `WKWebView` gives the iframe no
+    /// origin, and YouTube refuses with **"Error 153 — video player
+    /// configuration error"**. Serving a tiny host page from this base URL
+    /// instead gives the player the origin it requires.
+    static let embedBaseURL = URL(string: "https://www.youtube-nocookie.com")
+
+    /// A minimal host page wrapping the player in an iframe.
+    ///
+    /// `playsinline=1` keeps playback in place on iPhone rather than handing
+    /// the whole screen to the system player — the article's text is the
+    /// point, and the video is an illustration of it.
+    static func embedHTML(forID id: String) -> String? {
+        guard let embed = embedURL(forID: id) else { return nil }
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+        <style>
+          html, body { margin: 0; padding: 0; height: 100%; background: transparent; }
+          iframe { border: 0; width: 100%; height: 100%; display: block; }
+        </style>
+        </head>
+        <body>
+        <iframe src="\(embed.absoluteString)?playsinline=1&rel=0"
+                allow="accelerometer; encrypted-media; gyroscope; picture-in-picture"
+                allowfullscreen></iframe>
+        </body>
+        </html>
+        """
+    }
+
     private static func firstCaptureGroup(of pattern: String, in input: String) -> String? {
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(input.startIndex..., in: input)

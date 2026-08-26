@@ -102,6 +102,7 @@ Every open or unspecified choice, resolved. Final for v1. Referenced as **C1…C
 | C49 | User management | **Not on iOS, ever.** No user list, no create, no reset. | `CLAUDE.md`: the web app is the only surface for user management. |
 | C50 | Accessibility | Dynamic Type through **XXL**, VoiceOver labels on every control, light and dark mode. Verified in the simulator at each gate, not just at the end. | `CLAUDE.md` §iOS styling. Retrofitting accessibility is far more expensive than maintaining it. |
 | C51 | Home announcement count | **Three**, matching the three upcoming events beside it. | Neither the spec nor the storyboard fixes a number — the storyboard's two is simply what fit the wireframe. |
+| C53 | `UIImage` for decoding | Allowed in **`ImageCache`** and `Image(uiImage:)` only. Not a second UIKit exception in the C37 sense. | iOS 17 has no way to build a SwiftUI `Image` from bytes — `Image(uiImage:)` is SwiftUI's own initializer and `UIImage` is the data type it takes. No view controllers, no `UIViewRepresentable`, nothing that renders. Recorded so it is a decision rather than undocumented drift from "no UIKit". |
 | C52 | UI automation | **`XcodeBuildMCP` 2.7.0**, project-scoped and version-pinned in `.mcp.json`, with `ui-automation` enabled via `.xcodebuildmcp/config.yaml`. Semantic `snapshot_ui` + `tap`, not coordinates. | Added in Phase 4 after three phases of accumulating manual tap checks. **Closed 12 of the 13 outstanding manual checks in one pass**, including the row swipe actions and pagination that `simctl` cannot reach at all. Use it for every gate from Phase 5 on; the `simctl` fallback stays for build/install/screenshot. |
 
 ---
@@ -667,7 +668,43 @@ Quick tips hold gate codes and key locations. There is **no logging of any kind 
 
 **Gate:** §4 + simulator: render a real article containing all five block types (author it in the web app first), confirm the image loads and the video plays inline.
 
----
+#### Phase 8 status — ✅ COMPLETE
+
+**300 tests green, zero warnings.** The renderer replaces Phase 7's placeholder. A real five-block article renders correctly against the live server.
+
+##### The video did not play, and the walkthrough caught it
+
+The first build showed **"Error 153 — video player configuration error"** where the player should be. Loading `youtube-nocookie.com/embed/{id}` straight into a `WKWebView` gives the iframe **no origin**, and YouTube refuses to start.
+
+Fixed by serving a minimal host page — an `<iframe>` in a document loaded with `baseURL` set to the embed host, which is what gives the player its origin. The video then rendered with its thumbnail and play control. A regression test asserts the player is wrapped in a page rather than loaded as a bare URL.
+
+This is the kind of failure that is invisible to unit tests and to a code read: the URL was correct, the view was correct, and the whole thing still did not work.
+
+##### Verified in the live UI
+
+| Block | Result |
+|---|---|
+| heading, paragraph, bullets | ✅ in array order, correct markers |
+| image | ✅ degrades to **"Photo unavailable"** with its caption |
+| video | ✅ plays inline after the fix |
+| admin edit control | ✅ present for an admin |
+| dark mode + Dynamic Type XXL | ✅ wraps, no clipping, bullets stay aligned |
+
+##### The image gate item — closed, after two config bugs
+
+"Confirm the image loads" took three attempts and turned up two real problems in the **local server config**:
+
+1. **`aws s3 cp` failed** — the AWS session had expired. Resolved by `aws login`.
+2. **The bucket in `.env` did not exist.** It read `bearlake-media` / `us-west-2`; the real bucket is **`bearlake-media-prod` / `us-east-1`** (confirmed against `docs/deploy-smoke-2026-08-07.md`). Both the name and the region were wrong.
+3. **The server was emitting a stub URL.** `isS3Configured()` requires bucket, region, **and both AWS keys** to be non-empty in the environment — it does not use ambient credentials. With the keys blank it silently fell back to `https://images.invalid/{key}`, which is why an earlier check saw `url=PRESENT` and concluded S3 worked. It did not.
+
+So **local dev had never been able to serve a real image**, and the failure was invisible: the API returned a URL-shaped string and the client dutifully failed to load it.
+
+Fixed by pointing local `.env` at the production bucket and copying the **scoped** `bearlake-server` IAM credentials out of Railway (`s3:PutObject`/`s3:GetObject` on `articles/*` only — not root). `.env` is gitignored. Verified: `image_urls_resolver resolver=s3`, the presigned GET returned **HTTP 200, 4101 bytes, image/png**, and the photo rendered in the app above its caption.
+
+Test object deleted afterwards (C44); the bucket is empty again.
+
+**Carry forward to Phase 9,** which builds the upload pipeline: local S3 now works, and `isS3Configured()` failing open to a stub URL is worth remembering — an upload that appears to succeed against a stub proves nothing.
 
 ### Phase 9 — Article editor (admin) and image upload
 
