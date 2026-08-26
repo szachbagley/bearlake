@@ -5,6 +5,7 @@
 
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 
 /// The article editor (admin only). Secondary authoring surface — the web app
 /// is primary — so it is built for iterating on an existing article rather
@@ -94,7 +95,7 @@ struct ArticleEditorView: View {
             )) {
                 Button("Copy My Changes") {
                     if let json = model.changesJSONForPasteboard() {
-                        UIPasteboard.general.string = json
+                        copyToPasteboard(json)
                     }
                     Task { await model.reloadAfterConflict() }
                 }
@@ -136,6 +137,28 @@ struct ArticleEditorView: View {
                 }
             }
         }
+    }
+
+    /// Writes the rescued edits to the pasteboard (C54).
+    ///
+    /// `UIPasteboard` is UIKit, and the only programmatic clipboard write iOS
+    /// 17 offers — SwiftUI's `.copyable` needs focus and a selection,
+    /// `ShareLink` is a share sheet and cannot live inside an `.alert`, and
+    /// `PasteButton` reads rather than writes.
+    ///
+    /// Written with `setItems` rather than `.string` because an article can
+    /// document a gate code or where the keys live, and the general pasteboard
+    /// is readable by every other app and syncs to the admin's Mac and iPad by
+    /// default. `localOnly` keeps it on this device; the expiry clears it
+    /// without anyone having to remember to.
+    private func copyToPasteboard(_ json: String) {
+        UIPasteboard.general.setItems(
+            [[UTType.utf8PlainText.identifier: json]],
+            options: [
+                .localOnly: true,
+                .expirationDate: Date().addingTimeInterval(600),
+            ]
+        )
     }
 
     @ToolbarContentBuilder

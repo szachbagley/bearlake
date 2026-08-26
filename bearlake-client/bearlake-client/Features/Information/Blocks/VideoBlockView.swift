@@ -2,12 +2,20 @@
 //  VideoBlockView.swift
 //  bearlake-client
 //
-//  THE ONE SANCTIONED UIKit INTEROP IN THIS APP (C37).
+//  THE ONLY UIKit *VIEW* INTEROP IN THIS APP (C37).
 //
 //  iOS 17 has no SwiftUI-native web view — SwiftUI's `WebView` arrived in
 //  iOS 26, above our deployment floor — and YouTube cannot be played through
-//  AVPlayer. Everything UIKit in the app is confined to this file; anything
-//  else needs discussion first.
+//  AVPlayer. This is the only `UIViewRepresentable` in the app, and the only
+//  place UIKit renders anything.
+//
+//  Two narrower exceptions live elsewhere, neither of them a view:
+//    - `UIImage` as a data type, in `ImageCache` and `Image(uiImage:)` (C53)
+//    - `UIPasteboard` for one clipboard write in `ArticleEditorView` (C54)
+//
+//  Anything beyond those three needs discussion first. Note that none of them
+//  require `import UIKit` — SwiftUI re-exports it, so the compiler will not
+//  stop a fourth from appearing.
 //
 
 import SwiftUI

@@ -104,6 +104,7 @@ Every open or unspecified choice, resolved. Final for v1. Referenced as **C1…C
 | C51 | Home announcement count | **Three**, matching the three upcoming events beside it. | Neither the spec nor the storyboard fixes a number — the storyboard's two is simply what fit the wireframe. |
 | C53 | `UIImage` for decoding | Allowed in **`ImageCache`** and `Image(uiImage:)` only. Not a second UIKit exception in the C37 sense. | iOS 17 has no way to build a SwiftUI `Image` from bytes — `Image(uiImage:)` is SwiftUI's own initializer and `UIImage` is the data type it takes. No view controllers, no `UIViewRepresentable`, nothing that renders. Recorded so it is a decision rather than undocumented drift from "no UIKit". |
 | C52 | UI automation | **`XcodeBuildMCP` 2.7.0**, project-scoped and version-pinned in `.mcp.json`, with `ui-automation` enabled via `.xcodebuildmcp/config.yaml`. Semantic `snapshot_ui` + `tap`, not coordinates. | Added in Phase 4 after three phases of accumulating manual tap checks. **Closed 12 of the 13 outstanding manual checks in one pass**, including the row swipe actions and pagination that `simctl` cannot reach at all. Use it for every gate from Phase 5 on; the `simctl` fallback stays for build/install/screenshot. |
+| C54 | `UIPasteboard` for "Copy My Changes" | **Allowed**, in `ArticleEditorView` only, and written with `setItems(_:options:)` using `.localOnly: true` and a 10-minute expiry — never `.string`. | iOS 17 has no programmatic SwiftUI clipboard write: `.copyable` needs focus and a selection, `ShareLink` is a share sheet and cannot live inside an `.alert`, `PasteButton` only reads. The interop cost is nil — one line, no wrapper, no lifecycle. The **real** reason to scope it is privacy, not style: articles document gate codes and key locations, and `UIPasteboard.general` is readable by every other app and syncs to the admin's Mac and iPad via Universal Clipboard. `localOnly` plus an expiry keeps a rescued draft on one device and clears it unattended. |
 
 ---
 
@@ -785,13 +786,19 @@ The size-cap fix carries a second ceiling: `maxDecodeBytes` (100 MB) guards the 
 
 Verified in the simulator: the category picker now lists both categories with a checkmark on the current one.
 
-##### One item left for you (C54)
+##### C54 — `UIPasteboard`, resolved
 
-The review flagged `UIPasteboard` in `ArticleEditorView` as UIKit interop outside the single sanctioned exception (the `WKWebView` YouTube embed). It is a real observation — CLAUDE.md says to ask. It is one line behind "Copy My Changes" and there is no SwiftUI-native pasteboard write on iOS 17. **Left in place, flagged rather than decided.**
+The review flagged `UIPasteboard` in `ArticleEditorView` as UIKit interop outside the single sanctioned exception. Correct, and worth more than the style point.
 
+The full UIKit surface of the app is three symbols: `WKWebView` (C37, the only thing that renders), `UIImage` (C53, a data type), and this. They are different kinds of thing — a view, a value, and a **system service whose effect lands outside the app** — which is why the third deserved its own look rather than inheriting either precedent.
 
+**No SwiftUI-native alternative exists on iOS 17.** `.copyable(_:)` drives the system Copy command off focus and a selection, so it cannot be invoked from a button action; `ShareLink` is a share sheet rather than a clipboard write, and SwiftUI's `.alert` builder accepts only `Button` and `TextField` so it could not go there anyway; `PasteButton` reads. There is no `@Environment(\.pasteboard)`.
 
----
+So the exception is granted — but the call is tightened. The style question was the smaller one: an article can document the gate code or where the keys are hidden, and `UIPasteboard.general` is readable by every other app on the device and syncs to the admin's Mac and iPad by default. That is a wider exposure than the logging rule in CLAUDE.md forbids, reached by a different route. It now writes through `setItems` with `.localOnly: true` and a ten-minute expiry, so a rescued draft stays on one device and clears itself.
+
+**A caveat kept on the record:** the recovery path is weak regardless. An admin taps it and gets a wall of block JSON; pasting that into Notes and retyping it is not a real workflow. Its value is as a last-resort escape hatch against silently discarding someone's edits, which is what C39 exists to prevent. If a better conflict-resolution affordance is ever built, this button is the first thing it replaces.
+
+`VideoBlockView.swift`'s header claimed *"Everything UIKit in the app is confined to this file"* — false since C53, and doubly so now. It is corrected to list all three, and to note that **the compiler cannot enforce any of this**: SwiftUI re-exports UIKit, so a fourth exception would compile with no `import UIKit` anywhere. It is a review catch, not a build error. CLAUDE.md carries the same three-item list.
 
 ### Phase 10 — SwiftData offline cache
 
