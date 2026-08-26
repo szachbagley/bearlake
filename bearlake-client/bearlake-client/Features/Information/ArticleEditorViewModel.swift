@@ -37,13 +37,29 @@ final class ArticleEditorViewModel {
     /// the dismiss warning.
     private(set) var isDirty = false
 
+    /// Categories the article can be moved to, loaded alongside it.
+    private(set) var categories: [InfoCategory] = []
+
     private let api: BearLakeAPI
     private let uploader: ImageUploader
+    private let cache: ImageCache?
 
-    init(articleID: String, api: BearLakeAPI, uploader: ImageUploader? = nil) {
+    /// Identifies the upload currently in flight, or nil when none. A
+    /// progress callback that does not match is stale and ignored — including
+    /// one from the upload that just finished. See `addPhoto`.
+    private var uploadGeneration = 0
+    private var activeUpload: Int?
+
+    init(
+        articleID: String,
+        api: BearLakeAPI,
+        uploader: ImageUploader? = nil,
+        cache: ImageCache? = nil
+    ) {
         self.articleID = articleID
         self.api = api
         self.uploader = uploader ?? ImageUploader(api: api)
+        self.cache = cache
     }
 
     // MARK: - Load
@@ -56,6 +72,10 @@ final class ArticleEditorViewModel {
             let article = try await api.getArticle(id: articleID)
             apply(article)
             errorMessage = nil
+            // Secondary, and deliberately not fatal: without it the picker
+            // falls back to showing only the current category, which is the
+            // old behaviour rather than a broken screen.
+            categories = (try? await api.listCategories()) ?? []
         } catch let error as APIError {
             errorMessage = error.message
         } catch {
@@ -155,15 +175,39 @@ final class ArticleEditorViewModel {
     /// Uploads a picked photo and appends an image block holding the returned
     /// **key**. The presigned URL is never stored (C34).
     func addPhoto(_ data: Data) async {
+        // The progress callback arrives on URLSession's delegate queue and
+        // hops to the MainActor as its own Task, so it is not ordered against
+        // this function's resumption: the final 1.0 can land *after* the
+        // cleanup below and strand `uploadProgress` at a non-nil value
+        // forever, which permanently disables the photo picker. Stamping each
+        // upload and ignoring callbacks from stale generations makes the
+        // ordering irrelevant.
+        uploadGeneration += 1
+        let generation = uploadGeneration
+        activeUpload = generation
         uploadProgress = 0
-        defer { uploadProgress = nil }
-        do {
-            let key = try await uploader.upload(data, articleID: articleID) { [weak self] value in
-                Task { @MainActor [weak self] in self?.uploadProgress = value }
+        // Clearing `activeUpload` is what makes the guard below reject the
+        // final callback too — it can land after this runs.
+        defer {
+            if activeUpload == generation {
+                activeUpload = nil
+                uploadProgress = nil
             }
+        }
+        do {
+            let prepared = try await uploader.upload(data, articleID: articleID) { [weak self] value in
+                Task { @MainActor [weak self] in
+                    guard let self, self.activeUpload == generation else { return }
+                    self.uploadProgress = value
+                }
+            }
+            // Seed the cache with the exact bytes that went to S3 so the new
+            // block previews immediately; the block itself still carries only
+            // the key (C34, C35).
+            await cache?.insert(prepared.data, forKey: prepared.key)
             // url is nil: this block has never been read back from the API,
             // so there is no presigned URL yet. The next load supplies one.
-            blocks.append(.image(id: Block.newID(), key: key, caption: nil, url: nil))
+            blocks.append(.image(id: Block.newID(), key: prepared.key, caption: nil, url: nil))
             isDirty = true
         } catch let error as ImageUploadError {
             errorMessage = error.message
@@ -224,15 +268,29 @@ final class ArticleEditorViewModel {
         return nil
     }
 
-    var canSave: Bool { validationProblem == nil && isSaving == false && isDirty }
+    /// `uploadProgress` is part of this: saving mid-upload dismisses the
+    /// editor, and when the PUT finally lands `addPhoto` appends the block to
+    /// a ViewModel nobody is showing. The photo silently never reaches the
+    /// article and the S3 object is orphaned.
+    var canSave: Bool {
+        validationProblem == nil && isSaving == false && isDirty && uploadProgress == nil
+    }
 
     // MARK: - Save (step 7)
 
     /// - Returns: true when the article saved.
     @discardableResult
     func save() async -> Bool {
-        guard validationProblem == nil, let updatedAt = loadedUpdatedAt else {
-            errorMessage = validationProblem
+        if let problem = validationProblem {
+            errorMessage = problem
+            return false
+        }
+        // No token means the load never succeeded. Saving would either
+        // overwrite blindly or be rejected, and returning quietly would make
+        // Save look broken — the button would simply do nothing.
+        guard let updatedAt = loadedUpdatedAt else {
+            errorMessage = "This article hasn't finished loading yet. "
+                + "Close and reopen it, then try again."
             return false
         }
         isSaving = true
@@ -270,12 +328,25 @@ final class ArticleEditorViewModel {
 
     // MARK: - Conflict resolution (C39)
 
-    /// The local blocks as JSON, for "Copy my changes" — so an admin whose
-    /// edits are about to be discarded can keep them.
-    func blocksJSONForPasteboard() -> String? {
+    /// The local edits as JSON, for "Copy my changes" — so an admin whose
+    /// work is about to be discarded can keep it.
+    ///
+    /// Carries the title, status, and category as well as the blocks: the
+    /// button promises to copy *your changes*, and the reload that follows
+    /// discards all four. Copying only the blocks quietly loses a retitling.
+    func changesJSONForPasteboard() -> String? {
+        struct Snapshot: Encodable {
+            let title: String
+            let status: ArticleStatus
+            let categoryId: String
+            let blocks: [Block]
+        }
         let encoder = APICoding.makeEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(blocks) else { return nil }
+        let snapshot = Snapshot(
+            title: title, status: status, categoryId: categoryID, blocks: blocks
+        )
+        guard let data = try? encoder.encode(snapshot) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 

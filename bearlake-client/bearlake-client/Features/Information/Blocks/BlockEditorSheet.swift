@@ -13,6 +13,10 @@ import SwiftUI
 /// easier to show with room.
 struct BlockEditorSheet: View {
     let original: Block
+    /// The article view's cache, shared rather than rebuilt: a fresh actor
+    /// here would re-download an image the page just displayed, which is the
+    /// exact re-fetch a key-based cache exists to prevent (C35).
+    let cache: ImageCache
     var onSave: @MainActor (Block) -> Void
     var onCancel: @MainActor () -> Void
 
@@ -24,10 +28,12 @@ struct BlockEditorSheet: View {
 
     init(
         original: Block,
+        cache: ImageCache,
         onSave: @escaping @MainActor (Block) -> Void,
         onCancel: @escaping @MainActor () -> Void
     ) {
         self.original = original
+        self.cache = cache
         self.onSave = onSave
         self.onCancel = onCancel
 
@@ -150,7 +156,7 @@ struct BlockEditorSheet: View {
         case .image(_, let key, _, let url):
             Section("Photo") {
                 CachedAsyncImage(
-                    key: key, url: url.flatMap(URL.init(string:)), cache: ImageCache()
+                    key: key, url: url.flatMap(URL.init(string:)), cache: cache
                 )
                 .frame(maxHeight: 200)
             }
@@ -203,6 +209,7 @@ struct BlockEditorSheet: View {
 #Preview("Paragraph") {
     BlockEditorSheet(
         original: .paragraph(id: "1", text: "Check the chlorine level weekly."),
+        cache: ImageCache(),
         onSave: { _ in }, onCancel: {}
     )
 }
@@ -210,6 +217,7 @@ struct BlockEditorSheet: View {
 #Preview("Unknown") {
     BlockEditorSheet(
         original: .unknown(UnknownBlock(id: "1", type: "table", raw: [:])),
+        cache: ImageCache(),
         onSave: { _ in }, onCancel: {}
     )
 }

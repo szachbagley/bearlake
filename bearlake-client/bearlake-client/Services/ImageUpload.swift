@@ -82,7 +82,10 @@ enum ImageProcessing {
         else {
             throw ImageUploadError.unsupportedType(detectedContentType(of: data))
         }
-        guard data.count <= Limits.maxUploadBytes else {
+        // A decode-safety ceiling, not the upload limit: refuse to hand
+        // ImageIO something absurd. The real cap is applied below, to the
+        // bytes actually sent.
+        guard data.count <= Limits.maxDecodeBytes else {
             throw ImageUploadError.tooLarge(bytes: data.count)
         }
 
@@ -119,6 +122,15 @@ enum ImageProcessing {
             throw ImageUploadError.encodingFailed
         }
 
+        // The cap the server enforces applies to contentLength — the
+        // post-downscale JPEG — so it belongs here, after the re-encode.
+        // Checking the original instead rejected photos that would have
+        // uploaded comfortably: a 12 MB panorama becomes a few hundred KB at
+        // 2000 px / q0.85, and the family's phones produce exactly that.
+        guard output.length <= Limits.maxUploadBytes else {
+            throw ImageUploadError.tooLarge(bytes: output.length)
+        }
+
         return Prepared(
             data: output as Data,
             // Always JPEG: iOS decodes HEIC natively, so the client that most
@@ -145,14 +157,20 @@ actor ImageUploader {
         self.put = put
     }
 
-    /// - Returns: the S3 key to store on the block. The presigned URL is
-    ///   deliberately not returned — it expires, and only the key is
-    ///   persisted (C34).
+    /// What a finished upload hands back: the S3 key to store on the block,
+    /// and the exact bytes that were sent so a caller can seed an image cache
+    /// without re-fetching them. The presigned URL is deliberately absent —
+    /// it expires, and only the key is persisted (C34).
+    struct Uploaded: Equatable {
+        let key: String
+        let data: Data
+    }
+
     func upload(
         _ data: Data,
         articleID: String,
         onProgress: @escaping @Sendable (Double) -> Void = { _ in }
-    ) async throws -> String {
+    ) async throws -> Uploaded {
         let prepared = try ImageProcessing.prepare(data)
 
         // The presigned PUT signs Content-Type AND Content-Length, so the
@@ -179,7 +197,7 @@ actor ImageUploader {
         guard (200..<300).contains(status) else {
             throw ImageUploadError.uploadFailed(status: status)
         }
-        return presign.key
+        return Uploaded(key: presign.key, data: prepared.data)
     }
 
     /// A silent multi-second upload on cellular reads as a frozen app, so

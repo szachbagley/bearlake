@@ -72,7 +72,8 @@ struct ArticleView: View {
         }
         .sheet(isPresented: $isEditing) {
             ArticleEditorView(
-                articleID: model.articleID, api: api, categories: categories
+                articleID: model.articleID, api: api,
+                categories: categories, cache: cache
             ) {
                 isEditing = false
                 // The editor is the authority on what changed, so the

@@ -382,11 +382,33 @@ struct StaleArticleTests {
         model.replace(.paragraph(id: "b1", text: "Worth keeping"))
         _ = await model.save()
 
-        let json = try #require(model.blocksJSONForPasteboard())
+        let json = try #require(model.changesJSONForPasteboard())
         #expect(json.contains("Worth keeping"))
         // Parseable, so it can be pasted somewhere useful.
-        let restored = try decoder.decode([Block].self, from: Data(json.utf8))
-        #expect(restored == model.blocks)
+        struct Snapshot: Decodable {
+            let title: String
+            let status: ArticleStatus
+            let categoryId: String
+            let blocks: [Block]
+        }
+        let restored = try decoder.decode(Snapshot.self, from: Data(json.utf8))
+        #expect(restored.blocks == model.blocks)
+    }
+
+    /// The button says it copies *your changes*, and the reload that follows
+    /// discards the title and status too — so copying only blocks silently
+    /// loses a retitling.
+    @Test("Copy my changes carries the title, status, and category too")
+    func copyCarriesMetadata() async throws {
+        let (model, api) = await makeEditor(blocks: [.paragraph(id: "b1", text: "Mine")])
+        await api.setConflict(true)
+        model.setTitle("My renamed article")
+        model.setStatus(.published)
+        _ = await model.save()
+
+        let json = try #require(model.changesJSONForPasteboard())
+        #expect(json.contains("My renamed article"))
+        #expect(json.contains("published"))
     }
 
     @Test("Reload discards local edits and takes the server's version")
@@ -471,6 +493,138 @@ struct DirtyTrackingTests {
 
         #expect(model.isDirty == false)
         #expect(model.loadedUpdatedAt != before, "the next save uses the fresh token")
+    }
+}
+
+// MARK: - Review follow-ups: save gating and error surfacing
+
+@MainActor
+struct EditorSaveGuardTests {
+    /// Saving mid-upload dismisses the editor; when the PUT lands, addPhoto
+    /// appends the block to a ViewModel nobody is showing. The photo is lost
+    /// and the S3 object is orphaned.
+    @Test("Save is disabled while a photo is uploading")
+    func cannotSaveDuringUpload() async throws {
+        let article = InfoArticle.fixture(id: "a1", blocks: [])
+        let api = EditorAPI(article: article)
+        // Blocks in the PUT so the upload is observably in flight.
+        let gate = UploadGate()
+        let uploader = ImageUploader(api: api) { _, _, onProgress in
+            onProgress(0.5)
+            await gate.wait()
+            return 200
+        }
+        let model = ArticleEditorViewModel(articleID: "a1", api: api, uploader: uploader)
+        await model.load()
+        model.setTitle("Edited")
+        #expect(model.canSave, "dirty and valid, so it would save right now")
+
+        let upload = Task { await model.addPhoto(makeTestPhoto()) }
+        while model.uploadProgress == nil { await Task.yield() }
+
+        #expect(model.canSave == false, "an in-flight upload blocks the save")
+
+        await gate.open()
+        await upload.value
+        #expect(model.canSave, "and it comes back once the upload finishes")
+    }
+
+    /// A load that failed leaves no optimistic-lock token. Returning quietly
+    /// made Save do nothing at all — no alert, no dismissal.
+    @Test("saving without a load token surfaces a message instead of failing silently")
+    func saveWithoutTokenExplainsItself() async throws {
+        let api = EditorAPI(article: InfoArticle.fixture(id: "a1", blocks: []))
+        await api.setNextError(APIError(
+            status: 500, code: "INTERNAL", message: "Something went wrong."
+        ))
+        let model = ArticleEditorViewModel(articleID: "a1", api: api)
+        await model.load()
+        #expect(model.loadedUpdatedAt == nil, "the load failed, so there is no token")
+
+        model.errorMessage = nil
+        model.setTitle("A title good enough to pass validation")
+
+        #expect(await model.save() == false)
+        #expect(model.errorMessage != nil, "every failure surfaces something actionable")
+    }
+}
+
+/// Captures the progress callback so a test can fire it late, reproducing
+/// the real ordering hazard: the callback hops to the MainActor as its own
+/// Task and is not ordered against the upload's resumption.
+private actor LateProgress {
+    private var callback: (@Sendable (Double) -> Void)?
+    func capture(_ value: @escaping @Sendable (Double) -> Void) { callback = value }
+    func fireLate(_ value: Double) { callback?(value) }
+}
+
+@MainActor
+struct EditorUploadProgressTests {
+    /// A stranded `uploadProgress` leaves a phantom progress row on screen
+    /// and permanently disables the photo picker for the rest of the session.
+    @Test("a progress callback arriving after the upload cannot strand the picker")
+    func lateProgressCallbackIsIgnored() async throws {
+        let api = EditorAPI(article: InfoArticle.fixture(id: "a1", blocks: []))
+        let late = LateProgress()
+        let uploader = ImageUploader(api: api) { _, _, onProgress in
+            await late.capture(onProgress)
+            return 200
+        }
+        let model = ArticleEditorViewModel(articleID: "a1", api: api, uploader: uploader)
+        await model.load()
+
+        await model.addPhoto(makeTestPhoto())
+        #expect(model.uploadProgress == nil, "cleared when the upload finished")
+
+        // The stale callback lands now, after cleanup.
+        await late.fireLate(1.0)
+        for _ in 0..<10 { await Task.yield() }
+
+        #expect(model.uploadProgress == nil, "and a late callback does not revive it")
+    }
+
+    /// A freshly added photo has a key but no presigned URL until the article
+    /// is saved and read back, so without seeding there is nothing to render
+    /// and the block shows "Photo unavailable" in its own editor.
+    @Test("a successful upload seeds the shared image cache under its key")
+    func uploadSeedsCache() async throws {
+        let api = EditorAPI(article: InfoArticle.fixture(id: "a1", blocks: []))
+        let uploader = ImageUploader(api: api) { _, _, onProgress in
+            onProgress(1.0)
+            return 200
+        }
+        let cache = ImageCache()
+        let model = ArticleEditorViewModel(
+            articleID: "a1", api: api, uploader: uploader, cache: cache
+        )
+        await model.load()
+
+        await model.addPhoto(makeTestPhoto())
+
+        guard case .image(_, let key, _, let url) = model.blocks[0] else {
+            Issue.record("expected an image block"); return
+        }
+        #expect(url == nil, "still no presigned url — the block holds only the key")
+        #expect(await cache.cachedImage(forKey: key) != nil,
+                "so the preview comes from the cache we just seeded")
+    }
+}
+
+/// Lets a test hold a stubbed PUT open.
+private actor UploadGate {
+    private var continuations: [CheckedContinuation<Void, Never>] = []
+    private var isOpen = false
+
+    func wait() async {
+        if isOpen { return }
+        await withCheckedContinuation { continuations.append($0) }
+    }
+
+    func open() {
+        isOpen = true
+        let pending = continuations
+        continuations = []
+        for continuation in pending { continuation.resume() }
     }
 }
 

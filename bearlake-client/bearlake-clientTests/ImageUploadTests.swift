@@ -61,7 +61,7 @@ struct ImageValidationTests {
     @Test("anything over the cap is rejected before work begins")
     func rejectsOversize() {
         var oversized = makeImage(width: 40, height: 40)
-        oversized.append(Data(repeating: 0, count: Limits.maxUploadBytes + 1))
+        oversized.append(Data(repeating: 0, count: Limits.maxDecodeBytes + 1))
         #expect(throws: ImageUploadError.self) { try ImageProcessing.prepare(oversized) }
     }
 }
@@ -224,7 +224,10 @@ struct ImageUploadPipelineTests {
         let recorder = UploadRecorder()
         let (uploader, _) = makeUploader(recorder)
 
-        let key = try await uploader.upload(makeImage(width: 600, height: 400), articleID: "art-1")
+        let uploaded = try await uploader.upload(
+            makeImage(width: 600, height: 400), articleID: "art-1"
+        )
+        let key = uploaded.key
 
         #expect(key.hasPrefix("articles/art-1/"))
         #expect(key.contains("X-Amz") == false, "a presigned url must never become the stored key")
@@ -245,17 +248,48 @@ struct ImageUploadPipelineTests {
         #expect(await recorder.putRequests.isEmpty)
     }
 
-    @Test("an oversize photo is rejected before any presign call")
+    @Test("a photo past the decode ceiling is rejected before any presign call")
     func rejectsOversizeBeforePresign() async throws {
         let recorder = UploadRecorder()
         let (uploader, _) = makeUploader(recorder)
         var huge = makeImage(width: 40, height: 40)
-        huge.append(Data(repeating: 0, count: Limits.maxUploadBytes + 1))
+        huge.append(Data(repeating: 0, count: Limits.maxDecodeBytes + 1))
 
         await #expect(throws: ImageUploadError.self) {
             _ = try await uploader.upload(huge, articleID: "art-1")
         }
         #expect(await recorder.presignRequests.isEmpty)
+    }
+
+    /// The cap the server enforces is on `contentLength` — the bytes actually
+    /// PUT — so applying it to the original rejected photos that would have
+    /// uploaded comfortably. A big original that downscales small is exactly
+    /// the common case: an iPhone panorama.
+    @Test("a large original is accepted when it downscales under the cap")
+    func acceptsLargeOriginalThatShrinks() async throws {
+        let recorder = UploadRecorder()
+        let (uploader, _) = makeUploader(recorder)
+
+        // Padded past the old cap so this fails against the previous rule,
+        // which measured the original. A synthetic flat-colour JPEG is only a
+        // few hundred KB however many pixels it has, so the padding is what
+        // makes the original genuinely oversized; the pixels are what the
+        // downscale acts on.
+        var original = makeImage(width: 6000, height: 4000)
+        original.append(Data(repeating: 0, count: Limits.maxUploadBytes + 1))
+        #expect(original.count > Limits.maxUploadBytes, "oversized as delivered")
+
+        let uploaded = try await uploader.upload(original, articleID: "art-1")
+
+        #expect(uploaded.data.count <= Limits.maxUploadBytes)
+        #expect(uploaded.data.count < original.count, "it really was downscaled")
+        let decoded = try #require(UIImage(data: uploaded.data))
+        #expect(max(decoded.size.width, decoded.size.height) == 2000, "C41 cap")
+        let presign = try #require(await recorder.presignRequests.first)
+        #expect(
+            presign.contentLength == uploaded.data.count,
+            "C42: the signed length is the post-downscale count"
+        )
     }
 
     @Test("a rejected PUT surfaces as an upload failure")

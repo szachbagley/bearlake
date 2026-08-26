@@ -725,7 +725,7 @@ Test object deleted afterwards (C44); the bucket is empty again.
 
 #### Phase 9 status — ✅ COMPLETE
 
-**344 tests green, zero warnings.** The edit control stubbed in Phase 8 now opens a working editor.
+**350 tests green, zero warnings.** The edit control stubbed in Phase 8 now opens a working editor.
 
 ##### The upload round trip, verified against real S3
 
@@ -756,6 +756,38 @@ The picker also confirmed C40: it opened with *"Private Access to Photos"* and *
 
 - An actor-isolated property was mutated from outside its actor.
 - A test image was built with the renderer's default device scale, so a requested 800×600 was really 2400×1800 pixels and the "does not upscale" assertion was measuring the wrong thing.
+
+##### `/code-review` follow-ups — **350 tests green**
+
+The review raised 13 items. One was refuted, twelve were real and are fixed.
+
+**Refuted — the one flagged highest.** The claim was that `.environment(\.editMode, .constant(.active))` on the whole `List` makes row `Button`s inert, reducing the editor to reorder/delete. Checked in the simulator: tapping a block row opens `BlockEditorSheet` focused, with the caret in the field. It was verified twice, and `Add block` / `Add photo` were already exercised by the phase gate. No change made — a fix here would have been churn against working behaviour.
+
+**Fixed.** Grouped by what actually goes wrong:
+
+| Defect | Consequence if shipped |
+|---|---|
+| `uploadProgress` stranded by a late progress callback | phantom progress row, and `PhotosPicker` **dead for the rest of the session** |
+| Save enabled during an in-flight upload | editor dismisses, block appends to a discarded ViewModel — **photo silently lost, S3 object orphaned** |
+| `save()` returned false with `errorMessage = nil` when the load had failed | **Save does nothing at all** — no alert, no dismissal |
+| Draft note ordered ahead of the validation message | Save greys out with nothing explaining why, in the *normal* authoring state |
+| 10 MB cap applied to the original, not the post-downscale bytes | a large panorama rejected though it would upload at a few hundred KB |
+| `try?` swallowing `loadTransferable` failures | an iCloud photo that fails to download closes the picker in silence |
+| A fresh `ImageCache()` built inline in the sheet body | re-downloads an image the article just displayed — the exact re-fetch C35 exists to prevent |
+| A just-uploaded photo showed "Photo unavailable" in its own editor | reads as "the upload broke" when it succeeded |
+| "Copy My Changes" copied only blocks | a retitling is discarded by the reload it promises to protect |
+| Fields editable before the load returned | the response overwrites what was typed **and clears `isDirty`**, so no unsaved-changes warning |
+| Category picker offered only the current category | an article could never be moved between categories from iOS |
+
+The progress fix needed two attempts. Stamping each upload with a generation was not enough on its own: the generation still matched after the upload finished, so the *final* callback revived `uploadProgress`. Tracking an `activeUpload` that is cleared on completion is what makes the guard reject it. **The first version passed review-by-eye and failed the test** — which is why the test fires the callback late rather than asserting immediately after the await.
+
+The size-cap fix carries a second ceiling: `maxDecodeBytes` (100 MB) guards the decoder against a pathological input, while `maxUploadBytes` (10 MB) now matches the server, which applies it to `contentLength` — the bytes actually PUT.
+
+Verified in the simulator: the category picker now lists both categories with a checkmark on the current one.
+
+##### One item left for you (C54)
+
+The review flagged `UIPasteboard` in `ArticleEditorView` as UIKit interop outside the single sanctioned exception (the `WKWebView` YouTube embed). It is a real observation — CLAUDE.md says to ask. It is one line behind "Copy My Changes" and there is no SwiftUI-native pasteboard write on iOS 17. **Left in place, flagged rather than decided.**
 
 
 

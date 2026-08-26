@@ -18,15 +18,29 @@ struct ArticleEditorView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var isConfirmingDiscard = false
 
+    /// Shared with the article view behind it, so a photo it already fetched
+    /// is not downloaded again when its block is opened for a caption (C35).
+    private let cache: ImageCache
+
     init(
         articleID: String,
         api: BearLakeAPI,
         categories: [InfoCategory],
+        cache: ImageCache,
         onFinished: @escaping @MainActor () -> Void
     ) {
-        _model = State(initialValue: ArticleEditorViewModel(articleID: articleID, api: api))
+        _model = State(initialValue: ArticleEditorViewModel(
+            articleID: articleID, api: api, cache: cache
+        ))
         self.categories = categories
+        self.cache = cache
         self.onFinished = onFinished
+    }
+
+    /// The editor loads the full list so an article can be moved between
+    /// categories; the list passed in is the fallback until that lands.
+    private var pickerCategories: [InfoCategory] {
+        model.categories.isEmpty ? categories : model.categories
     }
 
     var body: some View {
@@ -36,6 +50,16 @@ struct ArticleEditorView: View {
                 blocksSection
                 addSection
             }
+            // Editing before the load returns is a silent data-loss path: the
+            // response overwrites whatever was typed and resets isDirty, so
+            // there is not even an unsaved-changes warning. The toolbar stays
+            // live, so Cancel still works.
+            .disabled(model.hasLoadedOnce == false)
+            .overlay {
+                if model.hasLoadedOnce == false {
+                    ProgressView().accessibilityLabel("Loading article")
+                }
+            }
             .navigationTitle("Edit Article")
             .navigationBarTitleDisplayMode(.inline)
             .task { await model.load() }
@@ -44,6 +68,7 @@ struct ArticleEditorView: View {
             .sheet(item: $editingBlock) { block in
                 BlockEditorSheet(
                     original: block,
+                    cache: cache,
                     onSave: { edited in
                         model.replace(edited)
                         editingBlock = nil
@@ -68,7 +93,7 @@ struct ArticleEditorView: View {
                 set: { if $0 == false { model.dismissConflict() } }
             )) {
                 Button("Copy My Changes") {
-                    if let json = model.blocksJSONForPasteboard() {
+                    if let json = model.changesJSONForPasteboard() {
                         UIPasteboard.general.string = json
                     }
                     Task { await model.reloadAfterConflict() }
@@ -92,8 +117,20 @@ struct ArticleEditorView: View {
             .onChange(of: photoItem) { _, item in
                 guard let item else { return }
                 Task {
-                    if let data = try? await item.loadTransferable(type: Data.self) {
+                    do {
+                        // A nil payload is a real outcome, not just an error:
+                        // an iCloud asset that fails to download comes back
+                        // empty. Either way the user tapped a photo and must
+                        // not be met with silence.
+                        guard let data = try await item.loadTransferable(type: Data.self) else {
+                            model.errorMessage = "That photo couldn't be loaded. "
+                                + "If it's stored in iCloud, open it in Photos first."
+                            photoItem = nil
+                            return
+                        }
                         await model.addPhoto(data)
+                    } catch {
+                        model.errorMessage = "That photo couldn't be loaded."
                     }
                     photoItem = nil
                 }
@@ -129,7 +166,7 @@ struct ArticleEditorView: View {
             Picker("Category", selection: Binding(
                 get: { model.categoryID }, set: { model.setCategory($0) }
             )) {
-                ForEach(categories) { category in
+                ForEach(pickerCategories) { category in
                     Text(category.title).tag(category.id)
                 }
             }
@@ -142,10 +179,13 @@ struct ArticleEditorView: View {
             }
             .pickerStyle(.segmented)
         } footer: {
-            if model.status == .draft {
-                Text("Drafts are only visible to admins.")
-            } else if let problem = model.validationProblem {
+            // Validation first. Articles are authored as drafts, so a draft
+            // note in front of it would hide the message in exactly the state
+            // that needs it — Save greys out with nothing explaining why.
+            if let problem = model.validationProblem {
                 Text(problem).foregroundStyle(.red)
+            } else if model.status == .draft {
+                Text("Drafts are only visible to admins.")
             } else if model.isDirty {
                 Text("Unsaved changes.")
             }
@@ -255,6 +295,7 @@ private struct BlockRow: View {
             id: "cat0", title: "Pool & Hot Tub", sortOrder: 0,
             createdAt: Date(), updatedAt: Date()
         )],
+        cache: ImageCache(),
         onFinished: {}
     )
 }
