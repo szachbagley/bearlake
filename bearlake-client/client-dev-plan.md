@@ -104,6 +104,7 @@ Every open or unspecified choice, resolved. Final for v1. Referenced as **C1…C
 | C51 | Home announcement count | **Three**, matching the three upcoming events beside it. | Neither the spec nor the storyboard fixes a number — the storyboard's two is simply what fit the wireframe. |
 | C53 | `UIImage` for decoding | Allowed in **`ImageCache`** and `Image(uiImage:)` only. Not a second UIKit exception in the C37 sense. | iOS 17 has no way to build a SwiftUI `Image` from bytes — `Image(uiImage:)` is SwiftUI's own initializer and `UIImage` is the data type it takes. No view controllers, no `UIViewRepresentable`, nothing that renders. Recorded so it is a decision rather than undocumented drift from "no UIKit". |
 | C52 | UI automation | **`XcodeBuildMCP` 2.7.0**, project-scoped and version-pinned in `.mcp.json`, with `ui-automation` enabled via `.xcodebuildmcp/config.yaml`. Semantic `snapshot_ui` + `tap`, not coordinates. | Added in Phase 4 after three phases of accumulating manual tap checks. **Closed 12 of the 13 outstanding manual checks in one pass**, including the row swipe actions and pagination that `simctl` cannot reach at all. Use it for every gate from Phase 5 on; the `simctl` fallback stays for build/install/screenshot. |
+| C54 | `UIPasteboard` for "Copy My Changes" | **Allowed**, in `ArticleEditorView` only, and written with `setItems(_:options:)` using `.localOnly: true` and a 10-minute expiry — never `.string`. | iOS 17 has no programmatic SwiftUI clipboard write: `.copyable` needs focus and a selection, `ShareLink` is a share sheet and cannot live inside an `.alert`, `PasteButton` only reads. The interop cost is nil — one line, no wrapper, no lifecycle. The **real** reason to scope it is privacy, not style: articles document gate codes and key locations, and `UIPasteboard.general` is readable by every other app and syncs to the admin's Mac and iPad via Universal Clipboard. `localOnly` plus an expiry keeps a rescued draft on one device and clears it unattended. |
 
 ---
 
@@ -723,7 +724,81 @@ Test object deleted afterwards (C44); the bucket is empty again.
 
 **Gate:** §4 + simulator: build a real article with all five block types **including a genuine photo upload to S3**, publish it, relaunch, and confirm the image renders from a fresh presigned URL. Delete the test article and its S3 object afterwards. Run `/code-review` on the diff.
 
----
+#### Phase 9 status — ✅ COMPLETE
+
+**350 tests green, zero warnings.** The edit control stubbed in Phase 8 now opens a working editor.
+
+##### The upload round trip, verified against real S3
+
+Driven through the actual UI — `PhotosPicker`, a real photo, a real bucket:
+
+| Stage | Evidence |
+|---|---|
+| Picked | 2400×1600 PNG from the simulator's library |
+| Downscaled + re-encoded | object in S3 is **2000×1333 `image/jpeg`** — long edge capped, aspect preserved, PNG→JPEG per C41 |
+| Content-Length signed correctly | **the PUT succeeded**, which is the proof: S3 rejects a mismatch between the signed and actual byte count |
+| Key namespaced | `articles/{articleId}/{uuid}` |
+| Stored on the block | key persisted; `url` present only as a transient read-time field |
+| Published, relaunched | photo rendered from a **fresh** presigned URL |
+
+The object was deleted afterwards and the bucket is empty (C44).
+
+##### Driving `PhotosPicker`
+
+Worth writing down for later phases: the photo picker runs **out of process**, so it is invisible to `snapshot_ui` and none of the elementRef-based tools can reach it. The bundled `axe` binary takes raw coordinates (`axe tap -x -y --udid`), which is the way through. The screenshot is 368 pt wide against a 402 pt screen, so coordinates read off a screenshot need scaling by ~1.09.
+
+The picker also confirmed C40: it opened with *"Private Access to Photos"* and **no permission prompt**, because the app never sees the library.
+
+##### What the compiler caught
+
+`Array.move(fromOffsets:toOffset:)` and `remove(atOffsets:)` live in **SwiftUI**, so using them in the ViewModel failed to build — the "ViewModels do not import SwiftUI" rule doing its job rather than being a style note. Both are implemented by hand on Foundation, matching SwiftUI's semantics (`destination` is an index *before* removal), with tests for moving down, moving up, moving several at once, and a no-op move that must not dirty the editor.
+
+##### Two mistakes of mine, both caught by tests
+
+- An actor-isolated property was mutated from outside its actor.
+- A test image was built with the renderer's default device scale, so a requested 800×600 was really 2400×1800 pixels and the "does not upscale" assertion was measuring the wrong thing.
+
+##### `/code-review` follow-ups — **350 tests green**
+
+The review raised 13 items. One was refuted, twelve were real and are fixed.
+
+**Refuted — the one flagged highest.** The claim was that `.environment(\.editMode, .constant(.active))` on the whole `List` makes row `Button`s inert, reducing the editor to reorder/delete. Checked in the simulator: tapping a block row opens `BlockEditorSheet` focused, with the caret in the field. It was verified twice, and `Add block` / `Add photo` were already exercised by the phase gate. No change made — a fix here would have been churn against working behaviour.
+
+**Fixed.** Grouped by what actually goes wrong:
+
+| Defect | Consequence if shipped |
+|---|---|
+| `uploadProgress` stranded by a late progress callback | phantom progress row, and `PhotosPicker` **dead for the rest of the session** |
+| Save enabled during an in-flight upload | editor dismisses, block appends to a discarded ViewModel — **photo silently lost, S3 object orphaned** |
+| `save()` returned false with `errorMessage = nil` when the load had failed | **Save does nothing at all** — no alert, no dismissal |
+| Draft note ordered ahead of the validation message | Save greys out with nothing explaining why, in the *normal* authoring state |
+| 10 MB cap applied to the original, not the post-downscale bytes | a large panorama rejected though it would upload at a few hundred KB |
+| `try?` swallowing `loadTransferable` failures | an iCloud photo that fails to download closes the picker in silence |
+| A fresh `ImageCache()` built inline in the sheet body | re-downloads an image the article just displayed — the exact re-fetch C35 exists to prevent |
+| A just-uploaded photo showed "Photo unavailable" in its own editor | reads as "the upload broke" when it succeeded |
+| "Copy My Changes" copied only blocks | a retitling is discarded by the reload it promises to protect |
+| Fields editable before the load returned | the response overwrites what was typed **and clears `isDirty`**, so no unsaved-changes warning |
+| Category picker offered only the current category | an article could never be moved between categories from iOS |
+
+The progress fix needed two attempts. Stamping each upload with a generation was not enough on its own: the generation still matched after the upload finished, so the *final* callback revived `uploadProgress`. Tracking an `activeUpload` that is cleared on completion is what makes the guard reject it. **The first version passed review-by-eye and failed the test** — which is why the test fires the callback late rather than asserting immediately after the await.
+
+The size-cap fix carries a second ceiling: `maxDecodeBytes` (100 MB) guards the decoder against a pathological input, while `maxUploadBytes` (10 MB) now matches the server, which applies it to `contentLength` — the bytes actually PUT.
+
+Verified in the simulator: the category picker now lists both categories with a checkmark on the current one.
+
+##### C54 — `UIPasteboard`, resolved
+
+The review flagged `UIPasteboard` in `ArticleEditorView` as UIKit interop outside the single sanctioned exception. Correct, and worth more than the style point.
+
+The full UIKit surface of the app is three symbols: `WKWebView` (C37, the only thing that renders), `UIImage` (C53, a data type), and this. They are different kinds of thing — a view, a value, and a **system service whose effect lands outside the app** — which is why the third deserved its own look rather than inheriting either precedent.
+
+**No SwiftUI-native alternative exists on iOS 17.** `.copyable(_:)` drives the system Copy command off focus and a selection, so it cannot be invoked from a button action; `ShareLink` is a share sheet rather than a clipboard write, and SwiftUI's `.alert` builder accepts only `Button` and `TextField` so it could not go there anyway; `PasteButton` reads. There is no `@Environment(\.pasteboard)`.
+
+So the exception is granted — but the call is tightened. The style question was the smaller one: an article can document the gate code or where the keys are hidden, and `UIPasteboard.general` is readable by every other app on the device and syncs to the admin's Mac and iPad by default. That is a wider exposure than the logging rule in CLAUDE.md forbids, reached by a different route. It now writes through `setItems` with `.localOnly: true` and a ten-minute expiry, so a rescued draft stays on one device and clears itself.
+
+**A caveat kept on the record:** the recovery path is weak regardless. An admin taps it and gets a wall of block JSON; pasting that into Notes and retyping it is not a real workflow. Its value is as a last-resort escape hatch against silently discarding someone's edits, which is what C39 exists to prevent. If a better conflict-resolution affordance is ever built, this button is the first thing it replaces.
+
+`VideoBlockView.swift`'s header claimed *"Everything UIKit in the app is confined to this file"* — false since C53, and doubly so now. It is corrected to list all three, and to note that **the compiler cannot enforce any of this**: SwiftUI re-exports UIKit, so a fourth exception would compile with no `import UIKit` anywhere. It is a review catch, not a build error. CLAUDE.md carries the same three-item list.
 
 ### Phase 10 — SwiftData offline cache
 

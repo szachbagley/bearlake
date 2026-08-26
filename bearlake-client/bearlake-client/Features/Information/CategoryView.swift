@@ -38,7 +38,10 @@ struct CategoryView: View {
                 NavigationLink {
                     ArticleView(
                         auth: auth, api: api,
-                        articleID: article.id, title: article.title
+                        articleID: article.id, title: article.title,
+                        // Passed down so the editor's category picker has
+                        // something to offer without refetching.
+                        categories: [model.category]
                     )
                 } label: {
                     HStack {

@@ -58,8 +58,15 @@ enum Limits {
     /// others are here because the list is part of the contract.
     static let allowedUploadContentTypes = ["image/jpeg", "image/png", "image/heic"]
 
-    /// 10 MB. Clients downscale well below this before uploading.
+    /// 10 MB. The server applies this to `contentLength`, so the client must
+    /// apply it to the **post-downscale** bytes too — checking the original
+    /// would reject photos that upload fine at a few hundred KB.
     static let maxUploadBytes = 10 * 1024 * 1024
+
+    /// A far looser ceiling on what we will hand to the image decoder, so a
+    /// pathological input cannot exhaust memory before it is downscaled.
+    /// Not the upload limit — that is `maxUploadBytes`, applied after.
+    static let maxDecodeBytes = 100 * 1024 * 1024
 
     // MARK: - Events
 

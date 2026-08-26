@@ -41,7 +41,12 @@ Work in one app at a time. When a change spans several (e.g. adding a field to a
 ### iOS client
 - **Minimum deployment: iOS 17.** Use `@Observable`, SwiftData, and `NavigationStack`. Do not generate Combine-heavy code, `ObservableObject`/`@Published`, or `NavigationView`. The Xcode template shipped `IPHONEOS_DEPLOYMENT_TARGET = 26.0`; it is corrected to 17.0 in client plan Phase 0. Anything above 17 excludes family members on older phones.
 - Swift, SwiftUI only. No XIBs, no storyboard files. **Swift 5 language mode** (not Swift 6 strict concurrency) — enforce isolation by hand with `@MainActor` on ViewModels and `actor` for shared mutable state.
-- **No UIKit, with exactly one sanctioned exception:** a `WKWebView` wrapped in `UIViewRepresentable` for the YouTube embed in article video blocks. iOS 17 has no SwiftUI-native web view and YouTube cannot play through `AVPlayer`. Confine it to that one file; any other UIKit interop needs discussion first.
+- **No UIKit, with three sanctioned exceptions** — each granted because iOS 17 offers no SwiftUI-native equivalent, and each recorded as a decision in `client-dev-plan.md`:
+  - **`WKWebView`** in `UIViewRepresentable`, for the YouTube embed in article video blocks (C37). The only UIKit that renders anything; confined to `VideoBlockView.swift`. SwiftUI's `WebView` arrived in iOS 26, above our floor.
+  - **`UIImage`** as a data type, in `ImageCache` and `Image(uiImage:)` (C53). There is no way to build a SwiftUI `Image` from bytes without it.
+  - **`UIPasteboard`** for the single clipboard write behind "Copy My Changes" (C54). `.copyable` needs focus and a selection, `ShareLink` is a share sheet and cannot live in an `.alert`, and `PasteButton` only reads. Write with `setItems(_:options:)` using `.localOnly` and an expiry — never `.string` — because article bodies carry gate codes and key locations, and the general pasteboard is readable by other apps and syncs to the user's other devices.
+
+  Anything beyond these three needs discussion first. **The compiler will not enforce this:** SwiftUI re-exports UIKit, so `UIPasteboard` and friends resolve with no `import UIKit` anywhere in the file. Adding a fourth exception is a code-review catch, not a build error.
 - **Testing: Swift Testing** (`import Testing`, `@Test`, `#expect`). No XCUITest bundle — UI verification is a scripted simulator run at each phase gate.
 - **Architecture: MVVM.** Views are SwiftUI structs; ViewModels are `@Observable` classes.
 - **Persistence: SwiftData** — used as a local cache of server state, not as the source of truth. The API is authoritative.

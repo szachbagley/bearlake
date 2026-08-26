@@ -13,9 +13,21 @@ struct ArticleView: View {
     /// One cache per article view: the images on a page are fetched together
     /// and released together when it closes.
     @State private var cache = ImageCache()
+    @State private var isEditing = false
 
-    init(auth: AuthViewModel, api: BearLakeAPI, articleID: String, title: String) {
+    private let api: BearLakeAPI
+    private let categories: [InfoCategory]
+
+    init(
+        auth: AuthViewModel,
+        api: BearLakeAPI,
+        articleID: String,
+        title: String,
+        categories: [InfoCategory] = []
+    ) {
         self.auth = auth
+        self.api = api
+        self.categories = categories
         _model = State(
             initialValue: ArticleViewModel(articleID: articleID, initialTitle: title, api: api)
         )
@@ -49,13 +61,24 @@ struct ArticleView: View {
             if auth.isAdmin {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        // Phase 9 supplies the editor.
+                        isEditing = true
                     } label: {
                         Image(systemName: "square.and.pencil")
                     }
                     .accessibilityLabel("Edit article")
                     .disabled(model.article == nil)
                 }
+            }
+        }
+        .sheet(isPresented: $isEditing) {
+            ArticleEditorView(
+                articleID: model.articleID, api: api,
+                categories: categories, cache: cache
+            ) {
+                isEditing = false
+                // The editor is the authority on what changed, so the
+                // renderer refetches rather than guessing.
+                Task { await model.load() }
             }
         }
         .alert(

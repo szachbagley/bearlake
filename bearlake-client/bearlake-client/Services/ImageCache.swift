@@ -72,6 +72,21 @@ actor ImageCache {
 
     func cachedImage(forKey key: String) -> UIImage? { cached[key] }
 
+    /// Seeds the cache with bytes we already hold, so a photo just uploaded
+    /// renders immediately under its new key.
+    ///
+    /// Without this the editor shows "Photo unavailable" for every freshly
+    /// added photo: the block carries a key but no presigned URL until the
+    /// article is saved and read back, and there is nothing to fetch from.
+    /// The bytes are the exact JPEG that went to S3, so this is the same
+    /// image the next read would return.
+    @discardableResult
+    func insert(_ data: Data, forKey key: String) -> Bool {
+        guard let image = UIImage(data: data) else { return false }
+        store(image, forKey: key)
+        return true
+    }
+
     var count: Int { cached.count }
 
     func clear() {
