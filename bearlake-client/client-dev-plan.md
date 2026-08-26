@@ -105,6 +105,7 @@ Every open or unspecified choice, resolved. Final for v1. Referenced as **C1…C
 | C53 | `UIImage` for decoding | Allowed in **`ImageCache`** and `Image(uiImage:)` only. Not a second UIKit exception in the C37 sense. | iOS 17 has no way to build a SwiftUI `Image` from bytes — `Image(uiImage:)` is SwiftUI's own initializer and `UIImage` is the data type it takes. No view controllers, no `UIViewRepresentable`, nothing that renders. Recorded so it is a decision rather than undocumented drift from "no UIKit". |
 | C52 | UI automation | **`XcodeBuildMCP` 2.7.0**, project-scoped and version-pinned in `.mcp.json`, with `ui-automation` enabled via `.xcodebuildmcp/config.yaml`. Semantic `snapshot_ui` + `tap`, not coordinates. | Added in Phase 4 after three phases of accumulating manual tap checks. **Closed 12 of the 13 outstanding manual checks in one pass**, including the row swipe actions and pagination that `simctl` cannot reach at all. Use it for every gate from Phase 5 on; the `simctl` fallback stays for build/install/screenshot. |
 | C54 | `UIPasteboard` for "Copy My Changes" | **Allowed**, in `ArticleEditorView` only, and written with `setItems(_:options:)` using `.localOnly: true` and a 10-minute expiry — never `.string`. | iOS 17 has no programmatic SwiftUI clipboard write: `.copyable` needs focus and a selection, `ShareLink` is a share sheet and cannot live inside an `.alert`, `PasteButton` only reads. The interop cost is nil — one line, no wrapper, no lifecycle. The **real** reason to scope it is privacy, not style: articles document gate codes and key locations, and `UIPasteboard.general` is readable by every other app and syncs to the admin's Mac and iPad via Universal Clipboard. `localOnly` plus an expiry keeps a rescued draft on one device and clears it unattended. |
+| C55 | Distribution | **Unlisted on the App Store** — not discoverable by search, installable by anyone with the link. | Owner's decision, Phase 11 step 8. Beats TestFlight (90-day build expiry, re-upload a few times a year) and cabled installs (every phone at the Mac) for a family spread across households. The cost is that it is a real App Store submission: full App Review, and unlisted status is itself a request Apple has to approve. See §9. |
 
 ---
 
@@ -1146,3 +1147,28 @@ This is not a defect, and it is the unavoidable cost of offline viewing, but it 
 - **A device with no passcode gets no encryption at rest.** That is the one configuration where this matters, and it is outside the app's control.
 
 If stronger protection is ever wanted, the lever is setting `NSFileProtectionComplete` on the store file — which would make the cache unreadable while the device is locked, and therefore break any future background refresh. Not worth it today; worth knowing the trade before someone asks.
+
+
+---
+
+## 9. Unlisted App Store distribution — what it actually requires (C55)
+
+Recorded because "put it on the App Store, unlisted" sounds like a switch and is not one. None of this is client code; all of it is App Store Connect work that has to happen before the family can install anything.
+
+**Unlisted is a request, not a setting.** Apple grants unlisted distribution on application, after the app has been approved. The usual order is: submit normally → get approved → request unlisted → Apple reissues the link. Plan for that being two rounds rather than one.
+
+**App Review will need to sign in.** There is no self-registration by design (accounts are admin-issued), so a reviewer cannot get in on their own. A demo account must go in App Review Information, and it needs to be a **member**, not an admin — a reviewer poking at admin-only destructive controls on the family's real data is not a risk worth taking. Give it `mustChangePassword = false` so the reviewer does not hit the forced-change gate and stall.
+
+**Things this app happens to be clear of:**
+
+- *Sign in with Apple* (§4.8) applies to apps offering third-party login. This one offers none.
+- *In-app account deletion* (§5.1.1(v)) applies to apps that support account **creation**. This one does not — accounts are issued by an admin and users are deactivated, never deleted. Worth stating plainly in the review notes rather than waiting to be asked.
+
+**Things that will need answering:**
+
+- A **privacy policy URL** is mandatory, even unlisted.
+- **Privacy nutrition labels**: the app collects an email address and user content, linked to identity, used only for app functionality — no tracking, no third-party analytics, no ads. That is an easy set of answers, but it has to be filled in.
+- **Minimum functionality (§4.2)** is the realistic rejection risk: a private app for one family has no broad audience. Unlisted distribution exists precisely for this, so say so in the review notes rather than leaving the reviewer to guess.
+- Screenshots, description, age rating, and an export-compliance answer (standard HTTPS only, no custom cryptography).
+
+**Not a client-code task.** Nothing above changes the app. It is worth doing before the `client-v1` tag only insofar as a rejection might force a build change; nothing currently known suggests one.
