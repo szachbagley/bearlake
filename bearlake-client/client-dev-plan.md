@@ -723,6 +723,42 @@ Test object deleted afterwards (C44); the bucket is empty again.
 
 **Gate:** §4 + simulator: build a real article with all five block types **including a genuine photo upload to S3**, publish it, relaunch, and confirm the image renders from a fresh presigned URL. Delete the test article and its S3 object afterwards. Run `/code-review` on the diff.
 
+#### Phase 9 status — ✅ COMPLETE
+
+**344 tests green, zero warnings.** The edit control stubbed in Phase 8 now opens a working editor.
+
+##### The upload round trip, verified against real S3
+
+Driven through the actual UI — `PhotosPicker`, a real photo, a real bucket:
+
+| Stage | Evidence |
+|---|---|
+| Picked | 2400×1600 PNG from the simulator's library |
+| Downscaled + re-encoded | object in S3 is **2000×1333 `image/jpeg`** — long edge capped, aspect preserved, PNG→JPEG per C41 |
+| Content-Length signed correctly | **the PUT succeeded**, which is the proof: S3 rejects a mismatch between the signed and actual byte count |
+| Key namespaced | `articles/{articleId}/{uuid}` |
+| Stored on the block | key persisted; `url` present only as a transient read-time field |
+| Published, relaunched | photo rendered from a **fresh** presigned URL |
+
+The object was deleted afterwards and the bucket is empty (C44).
+
+##### Driving `PhotosPicker`
+
+Worth writing down for later phases: the photo picker runs **out of process**, so it is invisible to `snapshot_ui` and none of the elementRef-based tools can reach it. The bundled `axe` binary takes raw coordinates (`axe tap -x -y --udid`), which is the way through. The screenshot is 368 pt wide against a 402 pt screen, so coordinates read off a screenshot need scaling by ~1.09.
+
+The picker also confirmed C40: it opened with *"Private Access to Photos"* and **no permission prompt**, because the app never sees the library.
+
+##### What the compiler caught
+
+`Array.move(fromOffsets:toOffset:)` and `remove(atOffsets:)` live in **SwiftUI**, so using them in the ViewModel failed to build — the "ViewModels do not import SwiftUI" rule doing its job rather than being a style note. Both are implemented by hand on Foundation, matching SwiftUI's semantics (`destination` is an index *before* removal), with tests for moving down, moving up, moving several at once, and a no-op move that must not dirty the editor.
+
+##### Two mistakes of mine, both caught by tests
+
+- An actor-isolated property was mutated from outside its actor.
+- A test image was built with the renderer's default device scale, so a requested 800×600 was really 2400×1800 pixels and the "does not upscale" assertion was measuring the wrong thing.
+
+
+
 ---
 
 ### Phase 10 — SwiftData offline cache
