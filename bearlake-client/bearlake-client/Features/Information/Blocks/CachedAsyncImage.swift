@@ -62,6 +62,9 @@ struct CachedAsyncImage: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            // children: .ignore so the icon and the caption are announced
+            // once, as one element, rather than as two.
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel("Photo unavailable")
     }
 

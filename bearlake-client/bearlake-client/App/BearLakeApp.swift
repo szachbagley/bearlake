@@ -101,9 +101,12 @@ struct RootView: View {
 struct SplashView: View {
     var body: some View {
         VStack(spacing: 16) {
+            // Decorative: "Bear Lake" underneath says the same thing, and
+            // VoiceOver announcing a symbol name adds nothing.
             Image(systemName: "house.and.flag")
                 .font(.largeTitle)
                 .foregroundStyle(.tint)
+                .accessibilityHidden(true)
             Text("Bear Lake").font(.title)
             ProgressView()
                 .accessibilityLabel("Signing in")
