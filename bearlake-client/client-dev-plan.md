@@ -1050,3 +1050,32 @@ cd ../bearlake-server && npm run dev
 - **`bearlake-web/` is the reference implementation, not a thing to copy blindly.** Where this plan deliberately diverges — HEIC re-encoding (C41), native `.onMove` reordering (Phase 9), no cabin-time echo (C28) — the divergence is recorded with its reason.
 - **Three contracts must stay identical across both clients** or they will silently disagree: the block schema (C30/C31), date-only all-day handling with inclusive ends (C22/C25), and `updatedAt` optimistic locking (C39).
 - **`CLAUDE.md` has been amended to match this plan** (landed with it, ahead of Phase 0). Swift files *do* auto-add (C5), the scheme is `bearlake-client` not `BearLake` (C10), and the Swift date, image-cache, and `WKWebView` rules from §2 are now in the always-loaded guidance rather than only here. Only the simulator device name is still a placeholder — Phase 0 step 3 fills it in. **If this plan and `CLAUDE.md` ever disagree again, this plan is the newer document and wins; fix `CLAUDE.md` in the same task rather than leaving both in circulation.**
+
+---
+
+## 8. Security sweep — Phase 11, step 2
+
+Each line verified against the tree by grep and/or a test, on the date of the Phase 11 branch.
+
+| Requirement | How it was checked | Result |
+|---|---|---|
+| Refresh token **only** in the Keychain | `TokenStore.store` is the sole writer, and it calls `secureStore.save` → `KeychainStore` | ✅ |
+| Nothing sensitive in `UserDefaults` | `grep -r UserDefaults` over the app target | ✅ **zero references** — the identifier appears once, in a comment explaining why it is not used |
+| Access token never persisted | `TokenStore.accessToken` is a plain in-memory `actor` property; no writer touches disk | ✅ |
+| No log carries an announcement/quick-tip body, password, or token | `grep -rE "\bprint\(\|NSLog\|os_log\|Logger(\|debugPrint\|dump("` | ✅ **zero logging calls of any kind** in the app target, so the stronger property holds: nothing is logged at all |
+| No force-unwrap or `try!` in non-test code | grep for `try!`, `fatalError(`, and `!` in postfix position | ✅ none |
+| Write payloads match the documented field set (C15) | `StrictBodySweepTests` pins the exact encoded key set for **every** create/update request against the server's `z.strictObject` schemas | ✅ 9 tests |
+| No `url` in any write payload (C34) | The `image` branch of `Block.encode` destructures `url` as `_` and has no line that emits it — unrepresentable rather than merely absent. Asserted for a block that *was* read with a live presigned URL | ✅ |
+| Every destructive action confirms first | All five `api.delete*` paths traced to a `confirmationDialog` | ✅ announcements, articles, quick tips, categories, events |
+
+### One thing Phase 10 changed, recorded rather than waved past
+
+Before the offline cache, announcement and quick-tip bodies — which hold **gate codes and where the keys are hidden** — existed only in memory. They are now written to disk in the SwiftData store.
+
+This is not a defect, and it is the unavoidable cost of offline viewing, but it is a genuine change in exposure and belongs on the record:
+
+- iOS encrypts the app container at rest under the default protection class whenever the device has a passcode, which is the realistic protection here.
+- The store holds only what that user already downloaded, and it is emptied on sign-out (Phase 10, step 4) so a second family member cannot read the first one's content.
+- **A device with no passcode gets no encryption at rest.** That is the one configuration where this matters, and it is outside the app's control.
+
+If stronger protection is ever wanted, the lever is setting `NSFileProtectionComplete` on the store file — which would make the cache unreadable while the device is locked, and therefore break any future background refresh. Not worth it today; worth knowing the trade before someone asks.
