@@ -47,8 +47,15 @@ final class ArticleViewModel {
         return article.blocks.allSatisfy(\.isUnknown)
     }
 
+    /// Whether this article genuinely has no content.
+    ///
+    /// Requires an article: with none loaded — a failed fetch and nothing
+    /// cached — the honest answer is "we don't know", and rendering "Nothing
+    /// here yet. Add some content" underneath a connection error tells the
+    /// user something false (C46).
     var isEmpty: Bool {
-        hasLoadedOnce && (article?.blocks.isEmpty ?? true)
+        guard let article else { return false }
+        return hasLoadedOnce && article.blocks.isEmpty
     }
 
     func load() async {

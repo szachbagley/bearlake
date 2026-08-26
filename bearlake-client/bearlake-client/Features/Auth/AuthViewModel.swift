@@ -82,12 +82,18 @@ final class AuthViewModel {
         do {
             let user = try await api.me()
             state = gatedState(for: user)
+        } catch let error as APIError where error.is(.network) {
+            // Launched with no signal. We cannot tell whether the token is
+            // still good, so keep it *and* the cached content — destroying
+            // either would punish a user for opening the app at the cabin.
+            // Signing in again once there is signal restores the session.
+            state = .signedOut
         } catch {
             // The stored token is dead. `APIClient` has already cleared the
             // Keychain via its refresh failure path; clearing again is
             // harmless and covers a non-401 failure.
             await tokens.clear()
-            state = .signedOut
+            signedOut()
         }
     }
 

@@ -15,7 +15,7 @@ struct HomeView: View {
     private let api: BearLakeAPI
     private let cache: CacheStore?
 
-    init(auth: AuthViewModel, api: BearLakeAPI, cache: CacheStore? = nil) {
+    init(auth: AuthViewModel, api: BearLakeAPI, cache: CacheStore?) {
         self.auth = auth
         self.api = api
         self.cache = cache
@@ -70,7 +70,11 @@ struct HomeView: View {
             if model.announcements.isEmpty {
                 if model.isLoading {
                     ProgressView().frame(maxWidth: .infinity)
-                } else {
+                } else if model.errorMessage == nil {
+                    // Only truthful when the load actually succeeded. A
+                    // failed fetch with nothing cached leaves the list empty
+                    // too, and "there is nothing here" is a different claim
+                    // from "we could not ask" (C46).
                     Text("No announcements yet.")
                         .foregroundStyle(.secondary)
                 }
@@ -115,7 +119,7 @@ struct HomeView: View {
             if model.upcoming.isEmpty {
                 if model.isLoading {
                     ProgressView().frame(maxWidth: .infinity)
-                } else {
+                } else if model.errorMessage == nil {
                     Text("Nothing on the calendar yet.")
                         .foregroundStyle(.secondary)
                 }
@@ -161,12 +165,16 @@ struct AnnouncementRow: View {
 
 #Preview("Admin") {
     NavigationStack {
-        HomeView(auth: .preview(), api: PreviewAPI())
+        HomeView(auth: .preview(), api: PreviewAPI(), cache: nil)
     }
 }
 
 #Preview("Member") {
     NavigationStack {
-        HomeView(auth: .preview(user: .previewMember), api: PreviewAPI(user: .previewMember))
+        HomeView(
+            auth: .preview(user: .previewMember),
+            api: PreviewAPI(user: .previewMember),
+            cache: nil
+        )
     }
 }

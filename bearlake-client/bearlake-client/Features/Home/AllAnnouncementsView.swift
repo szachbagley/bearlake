@@ -14,7 +14,7 @@ struct AllAnnouncementsView: View {
 
     private let api: BearLakeAPI
 
-    init(auth: AuthViewModel, api: BearLakeAPI, cache: CacheStore? = nil) {
+    init(auth: AuthViewModel, api: BearLakeAPI, cache: CacheStore?) {
         self.auth = auth
         self.api = api
         _model = State(initialValue: AnnouncementsViewModel(api: api, cache: cache))
@@ -31,7 +31,10 @@ struct AllAnnouncementsView: View {
             if model.isOffline {
                 Section { OfflineBanner() }
             }
-            if model.announcements.isEmpty && model.hasLoadedOnce && model.isLoading == false {
+            // errorMessage guards against claiming the list is empty when
+            // the fetch failed and there was nothing cached (C46).
+            if model.announcements.isEmpty, model.hasLoadedOnce,
+               model.isLoading == false, model.errorMessage == nil {
                 ContentUnavailableView(
                     "No Announcements",
                     systemImage: "megaphone",
@@ -137,12 +140,16 @@ struct AllAnnouncementsView: View {
 
 #Preview("Admin") {
     NavigationStack {
-        AllAnnouncementsView(auth: .preview(), api: PreviewAPI())
+        AllAnnouncementsView(auth: .preview(), api: PreviewAPI(), cache: nil)
     }
 }
 
 #Preview("Member") {
     NavigationStack {
-        AllAnnouncementsView(auth: .preview(user: .previewMember), api: PreviewAPI(user: .previewMember))
+        AllAnnouncementsView(
+            auth: .preview(user: .previewMember),
+            api: PreviewAPI(user: .previewMember),
+            cache: nil
+        )
     }
 }

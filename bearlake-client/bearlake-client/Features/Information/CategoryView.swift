@@ -19,7 +19,7 @@ struct CategoryView: View {
         auth: AuthViewModel,
         api: BearLakeAPI,
         category: InfoCategory,
-        cache: CacheStore? = nil
+        cache: CacheStore?
     ) {
         self.auth = auth
         self.api = api
@@ -38,7 +38,8 @@ struct CategoryView: View {
             if model.isOffline {
                 Section { OfflineBanner() }
             }
-            if model.articles.isEmpty && model.hasLoadedOnce && model.isLoading == false {
+            if model.articles.isEmpty, model.hasLoadedOnce,
+               model.isLoading == false, model.errorMessage == nil {
                 ContentUnavailableView(
                     "No Articles",
                     systemImage: "doc.text",
@@ -57,7 +58,8 @@ struct CategoryView: View {
                         articleID: article.id, title: article.title,
                         // Passed down so the editor's category picker has
                         // something to offer without refetching.
-                        categories: [model.category]
+                        categories: [model.category],
+                        cache: cache
                     )
                 } label: {
                     HStack {
@@ -157,7 +159,8 @@ struct CategoryView: View {
             category: InfoCategory(
                 id: "cat0", title: "Pool & Hot Tub", sortOrder: 0,
                 createdAt: Date(), updatedAt: Date()
-            )
+            ),
+            cache: nil
         )
     }
 }
@@ -169,7 +172,8 @@ struct CategoryView: View {
             category: InfoCategory(
                 id: "cat0", title: "Pool & Hot Tub", sortOrder: 0,
                 createdAt: Date(), updatedAt: Date()
-            )
+            ),
+            cache: nil
         )
     }
 }

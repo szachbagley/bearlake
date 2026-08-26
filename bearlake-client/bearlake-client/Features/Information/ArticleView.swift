@@ -24,7 +24,7 @@ struct ArticleView: View {
         articleID: String,
         title: String,
         categories: [InfoCategory] = [],
-        cache: CacheStore? = nil
+        cache: CacheStore?
     ) {
         self.auth = auth
         self.api = api
@@ -134,7 +134,8 @@ struct ArticleView: View {
     NavigationStack {
         ArticleView(
             auth: .preview(), api: PreviewAPI(),
-            articleID: "a1", title: "Monitoring chemicals"
+            articleID: "a1", title: "Monitoring chemicals",
+            cache: nil
         )
     }
 }

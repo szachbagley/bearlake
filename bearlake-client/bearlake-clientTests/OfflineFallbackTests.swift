@@ -330,7 +330,7 @@ struct SignOutClearsCacheTests {
         #expect(store.isEmpty == false)
 
         let api = FakeAPI()
-        let auth = AuthViewModel(api: api, tokens: TokenStore()) { store.clear() }
+        let auth = AuthViewModel(api: api, tokens: TokenStore(secureStore: InMemorySecureStore(), key: "refresh")) { store.clear() }
         await auth.logout()
 
         #expect(store.isEmpty, "nothing of the previous user's is left behind")
@@ -345,9 +345,103 @@ struct SignOutClearsCacheTests {
         #expect(store.isEmpty == false)
 
         let api = FakeAPI()
-        let auth = AuthViewModel(api: api, tokens: TokenStore()) { store.clear() }
+        let auth = AuthViewModel(api: api, tokens: TokenStore(secureStore: InMemorySecureStore(), key: "refresh")) { store.clear() }
         auth.sessionExpired()
 
         #expect(store.isEmpty)
+    }
+}
+
+// MARK: - A network blip is not a sign-out
+
+@MainActor
+struct OfflineRestoreTests {
+    /// Found by the Phase 10 gate, and the reason the gate exists.
+    ///
+    /// Opening the app at the cabin with no signal used to clear the Keychain
+    /// and — once step 4 landed — the offline cache with it. One moment
+    /// without coverage permanently signed the user out and destroyed the
+    /// content this phase exists to preserve.
+    @Test("restoring with no network keeps both the token and the cache")
+    func offlineRestoreKeepsEverything() async throws {
+        let store = try makeStore()
+        store.save(quickTips: [.fixture(id: "t1", body: "Keys are in the lockbox.")])
+
+        let api = FakeAPI()
+        await api.setAlwaysFails(offline)
+        let tokens = TokenStore(secureStore: InMemorySecureStore(), key: "refresh")
+        try await tokens.store(
+            SessionResult(accessToken: "a", refreshToken: "r", user: .fixture())
+        )
+
+        let auth = AuthViewModel(api: api, tokens: tokens) { store.clear() }
+        await auth.restore()
+
+        #expect(auth.state == .signedOut, "it cannot verify, so it cannot enter")
+        #expect(await tokens.hasSession, "but the token survives for the next attempt")
+        #expect(store.isEmpty == false, "and so does the saved content")
+    }
+
+    /// The contrast: a genuinely dead token must still clear both.
+    @Test("restoring with a rejected token clears the token and the cache")
+    func rejectedTokenClearsEverything() async throws {
+        let store = try makeStore()
+        store.save(quickTips: [.fixture(id: "t1")])
+
+        let api = FakeAPI()
+        await api.setAlwaysFails(APIError(
+            status: 401, code: "UNAUTHENTICATED", message: "Your session has expired."
+        ))
+        let tokens = TokenStore(secureStore: InMemorySecureStore(), key: "refresh")
+        try await tokens.store(
+            SessionResult(accessToken: "a", refreshToken: "r", user: .fixture())
+        )
+
+        let auth = AuthViewModel(api: api, tokens: tokens) { store.clear() }
+        await auth.restore()
+
+        #expect(auth.state == .signedOut)
+        #expect(await tokens.hasSession == false)
+        #expect(store.isEmpty, "a real sign-out still takes the cache with it")
+    }
+}
+
+// MARK: - "Empty" must not mean "we could not ask"
+
+@MainActor
+struct EmptyStateHonestyTests {
+    /// Found by the Phase 10 gate: an uncached article rendered "Nothing here
+    /// yet. Add some content with the edit button." *underneath* a connection
+    /// error. Two contradictory claims, and the reassuring one is false.
+    @Test("an article that failed to load is not reported as empty")
+    func failedArticleIsNotEmpty() async throws {
+        let store = try makeStore()
+        let api = FakeAPI()
+        await api.setAlwaysFails(offline)
+
+        let model = ArticleViewModel(
+            articleID: "never-seen", initialTitle: "Starting the boat",
+            api: api, cache: store
+        )
+        await model.load()
+
+        #expect(model.errorMessage != nil, "the failure is surfaced")
+        #expect(model.isEmpty == false, "and the article is not claimed to be empty")
+    }
+
+    /// The contrast: an article that really has no blocks still says so.
+    @Test("an article that loaded with no blocks is reported as empty")
+    func genuinelyEmptyArticleIsEmpty() async throws {
+        let store = try makeStore()
+        let api = FakeAPI()
+        await api.setArticle(.fixture(id: "a1", blocks: []))
+
+        let model = ArticleViewModel(
+            articleID: "a1", initialTitle: "Empty", api: api, cache: store
+        )
+        await model.load()
+
+        #expect(model.errorMessage == nil)
+        #expect(model.isEmpty, "genuinely empty, and knowably so")
     }
 }
