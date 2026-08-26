@@ -893,6 +893,73 @@ The cache also survived a relaunch with the server down, which is the restore fi
 
 ---
 
+#### Phase 11 status — steps 1–5 ✅, steps 6–8 need the owner
+
+**419 tests green, zero warnings.**
+
+##### Step 1 — §6 checklist, read as a stranger's PR
+
+| Item | Result |
+|---|---|
+| ViewModels do not import SwiftUI | ✅ |
+| No `URLSession` outside `Services/` | ✅ (the one hit is a comment) |
+| No force-unwrap, `try!`, or `fatalError` | ✅ |
+| Data loaded in `.task`, never `.onAppear` | ✅ zero `.onAppear` in the app |
+| Every View file has a `#Preview` | ✅ |
+| Every destructive action confirms | ✅ all five delete paths |
+| No invented screens | ✅ inventory matches the spec |
+| **Views are pure** | ❌ → fixed |
+| **No `TimeInterval` date math** | ❌ → fixed |
+
+`AnnouncementEditorView` was the last editor still doing its own networking, save state, validation, and error handling inside a `View`. Extracted to `AnnouncementEditorViewModel`, which made that save path reachable from a test for the first time. `PreviewSupport` computed "a month ago" as `- 86_400 * 30`; preview data cannot produce a user-visible bug, but a wrong example gets copied somewhere it matters.
+
+##### Step 2 — security sweep
+
+Recorded in full in §8. The two worth repeating: **`UserDefaults` has zero references** in the app target, and there are **zero logging calls of any kind**, so "no log carries a gate code" holds in the strongest available form. `StrictBodySweepTests` now pins the exact key set of every write payload against the server's `z.strictObject` schemas.
+
+§8 also records something no checklist line covered: Phase 10 moved gate codes and key locations from memory onto disk. Protected by container encryption when the device has a passcode, emptied on sign-out, unprotected on a device without one.
+
+##### Step 3 — accessibility
+
+Dark mode and Dynamic Type through XXL verified on every screen. Three fixes:
+
+- **The month grid spoke bare numbers.** On screen that is right — the header supplies the month — but VoiceOver reads cells in isolation, so swiping the grid gave "one, two, three" with no month or weekday, and the weekday header is decorative and hidden. Cells now say "Wednesday, August 26, today" while the visible text stays a number. Formatting went into `CabinDate.spokenDayLabel` rather than the view (C27), tested across five timezones.
+- **Past XXL the grid collapsed** — seven columns of digits collided and the month truncated to "A…". Grid and header now cap at XXL, as the system Calendar's does, while everything anyone *reads* keeps scaling to the largest accessibility size.
+- The splash icon is decorative and now hidden; the "Photo unavailable" placeholder is announced once rather than twice.
+
+**Not done: driving VoiceOver itself.** The simulator accepts the `defaults write` but the accessibility daemon does not act on it without a Settings toggle, and forcing it risks wedging the automation. What was verified is the accessibility tree — the exact data VoiceOver consumes — on every control of every screen. A hands-on VoiceOver pass belongs with the device run in step 6.
+
+##### Step 4 — date audit: zero violations
+
+`Calendar.current` and `TimeZone.current` appear nowhere outside `CabinDate`. `ISO8601DateFormatter` appears only in `APICoding`, with both the fractional-seconds option and a fallback (C23). Every `calendar.date(from:)` builds from `CabinDate`'s **text** parser, never an ISO read of a bare date (C22).
+
+One consolidation: three sites had written out the same `components → date → format` dance, so it became `CabinDate.dateLabel(forDateOnly:)`.
+
+##### Step 5 — performance, and the one real finding
+
+Exercised with **62 events in one month** and a **120-block article**.
+
+The calendar held — six month steps under load stayed responsive, the buffer month loaded, and the month-change selection rule still landed on the first of the month.
+
+The article did not. `ArticleView` used a plain `VStack`, so opening an article built **every** block up front. For a long article that is wasteful; for an article with several photos it would fire every image load at once regardless of what is on screen. `LazyVStack` fixed it:
+
+| | before | after |
+|---|---|---|
+| rendered elements, 120-block article | 553 | **122** |
+| scroll settles | ✗ timed out | ✅ |
+
+Rebuilding rows on scroll-back is safe *because* `ImageCache` keys on the S3 key rather than the rotating presigned URL (C35) — already pinned by "the same key with different presigned URLs fetches once". That decision paid for itself here.
+
+##### Steps 6–8 — blocked on the owner
+
+- **Step 6, physical iPhone:** needs a device. Production is up and answering correctly (401 unauthenticated, correct error shape on a bad login), and release builds already point at it.
+- **Step 7, production smoke test:** needs a production account credential, which is not derivable from anything in the repo — user passwords are bcrypt hashes in the prod database.
+- **Step 8, distribution:** the plan says explicitly to raise it rather than assume.
+
+**Step 9 (tag `client-v1`) is deliberately not done yet** — the gate requires the smoke transcript, and tagging a release that has never run on real hardware would make the tag a lie.
+
+---
+
 ## 6. Per-phase review checklist
 
 Applied at every phase gate (step 5 of §4):
