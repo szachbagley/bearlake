@@ -15,76 +15,64 @@ struct AnnouncementDraft: Identifiable {
 /// Create or edit an announcement. Admin-only, enforced by the server.
 ///
 /// `postedAt` is displayed but never editable: the server sets it on create
-/// and an update sends **`{body}` and nothing else**. Sending anything more
-/// is a 400 under the strict-body rule (C15).
+/// and an update sends **`{body}` and nothing else** (C15). All of that lives
+/// in `AnnouncementEditorViewModel`; this file is presentation only.
 struct AnnouncementEditorView: View {
-    let api: BearLakeAPI
-    let draft: AnnouncementDraft
+    @State private var model: AnnouncementEditorViewModel
     var onFinished: @MainActor (Announcement?) -> Void
 
-    @State private var text: String
-    @State private var isSaving = false
-    @State private var errorMessage: String?
     @State private var isConfirmingDiscard = false
     @FocusState private var isFocused: Bool
 
-    private let dates = CabinDate()
-
-    init(api: BearLakeAPI, draft: AnnouncementDraft, onFinished: @escaping @MainActor (Announcement?) -> Void) {
-        self.api = api
-        self.draft = draft
+    init(
+        api: BearLakeAPI,
+        draft: AnnouncementDraft,
+        onFinished: @escaping @MainActor (Announcement?) -> Void
+    ) {
+        _model = State(initialValue: AnnouncementEditorViewModel(
+            api: api, existing: draft.existing
+        ))
         self.onFinished = onFinished
-        _text = State(initialValue: draft.existing?.body ?? "")
     }
-
-    private var isEditing: Bool { draft.existing != nil }
-    private var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var isOverLength: Bool { text.count > Limits.announcementBodyMax }
-    /// The same rule the tests exercise, so the button and the assertion
-    /// cannot drift apart.
-    private var canSave: Bool {
-        AnnouncementsViewModel.validationProblem(body: text) == nil && isSaving == false
-    }
-    private var hasChanges: Bool { trimmed != (draft.existing?.body ?? "") }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    TextEditor(text: $text)
-                        .frame(minHeight: 160)
-                        .focused($isFocused)
-                        .accessibilityLabel("Announcement text")
+                    TextEditor(text: Binding(
+                        get: { model.text }, set: { model.setText($0) }
+                    ))
+                    .frame(minHeight: 160)
+                    .focused($isFocused)
+                    .accessibilityLabel("Announcement text")
                 } header: {
                     Text("Announcement")
                 } footer: {
                     VStack(alignment: .leading, spacing: 4) {
                         // Live counter, so the limit is visible before the
                         // server rejects it rather than after.
-                        Text("\(text.count) / \(Limits.announcementBodyMax)")
-                            .foregroundStyle(isOverLength ? .red : .secondary)
-                        if let errorMessage {
+                        Text("\(model.characterCount) / \(Limits.announcementBodyMax)")
+                            .foregroundStyle(model.isOverLength ? .red : .secondary)
+                        if let errorMessage = model.errorMessage {
                             Text(errorMessage).foregroundStyle(.red)
                         }
                     }
                 }
 
-                if let existing = draft.existing {
+                if let postedLabel = model.postedLabel {
                     Section("Posted") {
-                        Text(dates.dateLabel(from: existing.postedAt))
+                        Text(postedLabel)
                             .foregroundStyle(.secondary)
-                            .accessibilityLabel(
-                                "Posted \(dates.dateLabel(from: existing.postedAt)). Not editable."
-                            )
+                            .accessibilityLabel("Posted \(postedLabel). Not editable.")
                     }
                 }
             }
-            .navigationTitle(isEditing ? "Edit Announcement" : "New Announcement")
+            .navigationTitle(model.isEditing ? "Edit Announcement" : "New Announcement")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
-                        if hasChanges {
+                        if model.hasChanges {
                             isConfirmingDiscard = true
                         } else {
                             onFinished(nil)
@@ -92,10 +80,15 @@ struct AnnouncementEditorView: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    if isSaving {
+                    if model.isSaving {
                         ProgressView()
                     } else {
-                        Button("Save", action: save).disabled(canSave == false)
+                        Button("Save") {
+                            Task {
+                                if let saved = await model.save() { onFinished(saved) }
+                            }
+                        }
+                        .disabled(model.canSave == false)
                     }
                 }
             }
@@ -107,30 +100,8 @@ struct AnnouncementEditorView: View {
                 Button("Discard", role: .destructive) { onFinished(nil) }
                 Button("Keep Editing", role: .cancel) {}
             }
-            .disabled(isSaving)
+            .disabled(model.isSaving)
             .task { isFocused = true }
-        }
-    }
-
-    private func save() {
-        guard canSave else { return }
-        isSaving = true
-        errorMessage = nil
-        Task {
-            defer { isSaving = false }
-            do {
-                let saved: Announcement
-                if let existing = draft.existing {
-                    saved = try await api.updateAnnouncement(id: existing.id, body: trimmed)
-                } else {
-                    saved = try await api.createAnnouncement(body: trimmed)
-                }
-                onFinished(saved)
-            } catch let error as APIError {
-                errorMessage = error.message
-            } catch {
-                errorMessage = "Couldn't save that announcement."
-            }
         }
     }
 }
@@ -145,11 +116,12 @@ struct AnnouncementEditorView: View {
     AnnouncementEditorView(
         api: PreviewAPI(),
         draft: AnnouncementDraft(existing: Announcement(
-            id: "1", body: "The marina passcode this summer is 845256.",
-            postedAt: Date(timeIntervalSince1970: 1_785_585_600),
+            id: "a1",
+            body: "The marina gate code changed to 4417 for the rest of the season.",
+            postedAt: Date(),
             createdBy: "u1",
-            createdAt: Date(timeIntervalSince1970: 1_785_585_600),
-            updatedAt: Date(timeIntervalSince1970: 1_785_585_600)
+            createdAt: Date(),
+            updatedAt: Date()
         )),
         onFinished: { _ in }
     )
