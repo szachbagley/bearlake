@@ -23,14 +23,25 @@ final class HomeViewModel {
     /// user can act on; nothing fails silently.
     var errorMessage: String?
 
+    /// C46. True when what is on screen came from the cache because the
+    /// network failed — drives the banner and disables mutating controls.
+    private(set) var isOffline = false
+
     private let api: BearLakeAPI
     private let dates: CabinDate
     private let now: () -> Date
+    private let cache: CacheStore?
 
-    init(api: BearLakeAPI, dates: CabinDate = CabinDate(), now: @escaping () -> Date = Date.init) {
+    init(
+        api: BearLakeAPI,
+        dates: CabinDate = CabinDate(),
+        now: @escaping () -> Date = Date.init,
+        cache: CacheStore? = nil
+    ) {
         self.api = api
         self.dates = dates
         self.now = now
+        self.cache = cache
     }
 
     var isEmpty: Bool { announcements.isEmpty && upcoming.isEmpty }
@@ -44,27 +55,48 @@ final class HomeViewModel {
         // other, so they are awaited separately and the first error wins the
         // alert.
         var firstError: String?
+        // Each half falls back independently: announcements loading while the
+        // calendar fails should still show announcements.
+        var servedFromCache = false
 
         do {
             let page = try await api.listAnnouncements(
                 limit: Self.announcementPreviewCount, cursor: nil
             )
             announcements = page.items
-        } catch let error as APIError {
-            firstError = error.message
+            cache?.save(announcements: page.items, replacingAll: true)
         } catch {
-            firstError = "Couldn't load announcements."
+            switch CacheFallback.forList(
+                error,
+                cached: cache?.announcements(limit: Self.announcementPreviewCount) ?? [],
+                fallback: "Couldn't load announcements."
+            ) {
+            case .cached(let items):
+                announcements = items
+                servedFromCache = true
+            case .failed(let message):
+                firstError = message
+            }
         }
 
         do {
             upcoming = try await loadUpcoming()
-        } catch let error as APIError {
-            firstError = firstError ?? error.message
         } catch {
-            firstError = firstError ?? "Couldn't load the calendar."
+            switch CacheFallback.forList(
+                error, cached: cachedUpcoming(), fallback: "Couldn't load the calendar."
+            ) {
+            case .cached(let events):
+                upcoming = events
+                servedFromCache = true
+            case .failed(let message):
+                firstError = firstError ?? message
+            }
         }
 
-        errorMessage = firstError
+        isOffline = servedFromCache
+        // The banner already explains a cache read; an alert on top of it
+        // would be the same news twice.
+        errorMessage = servedFromCache ? nil : firstError
     }
 
     /// The next three events.
@@ -88,8 +120,23 @@ final class HomeViewModel {
         }
 
         let fetched = try await api.listEvents(start: startOfToday, end: windowEnd)
+        cache?.save(
+            events: fetched,
+            window: dates.dateOnlyString(from: startOfToday)...dates.dateOnlyString(from: windowEnd)
+        )
+        return selectUpcoming(from: fetched, asOf: reference)
+    }
 
-        return fetched
+    /// The cached path must land on the same three events as the live one, so
+    /// the selection is shared rather than restated (C51 + the next-three
+    /// rule). Only the source of the array differs.
+    private func cachedUpcoming() -> [CalendarEvent] {
+        guard let cache else { return [] }
+        return selectUpcoming(from: cache.events(), asOf: now())
+    }
+
+    private func selectUpcoming(from events: [CalendarEvent], asOf reference: Date) -> [CalendarEvent] {
+        events
             .compactMap { event -> (CalendarEvent, EventDates)? in
                 // An event whose dates cannot be decoded is a contract
                 // violation, not something to render half of.

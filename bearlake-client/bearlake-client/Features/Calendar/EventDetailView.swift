@@ -16,6 +16,14 @@ struct EventDetailView: View {
     let rangeLabel: String
     /// Non-nil only when the viewer may edit.
     var onEdit: (@MainActor () -> Void)?
+    /// Dismisses the sheet.
+    ///
+    /// Required, not optional: with `onEdit` nil this screen previously had
+    /// no button at all and relied on swipe-to-dismiss. That is not
+    /// discoverable for an audience of varying technical ability, and Phase
+    /// 10 made it the path *everyone* takes offline rather than only members
+    /// viewing someone else's event.
+    var onClose: @MainActor () -> Void = {}
 
     var body: some View {
         NavigationStack {
@@ -46,6 +54,9 @@ struct EventDetailView: View {
             .navigationTitle("Event")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done", action: onClose)
+                }
                 if let onEdit {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button(action: onEdit) {

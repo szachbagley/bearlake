@@ -18,12 +18,18 @@ final class AnnouncementsViewModel {
     private(set) var hasLoadedOnce = false
     var errorMessage: String?
 
+    /// C46. True when what is on screen came from the cache because the
+    /// network failed — drives the banner and disables mutating controls.
+    private(set) var isOffline = false
+
     private let api: BearLakeAPI
     private let dates: CabinDate
+    private let cache: CacheStore?
 
-    init(api: BearLakeAPI, dates: CabinDate = CabinDate()) {
+    init(api: BearLakeAPI, dates: CabinDate = CabinDate(), cache: CacheStore? = nil) {
         self.api = api
         self.dates = dates
+        self.cache = cache
     }
 
     var canLoadMore: Bool { nextCursor != nil && isLoadingMore == false }
@@ -42,10 +48,24 @@ final class AnnouncementsViewModel {
             announcements = page.items
             nextCursor = page.nextCursor
             errorMessage = nil
-        } catch let error as APIError {
-            errorMessage = error.message
+            isOffline = false
+            cache?.save(announcements: page.items, replacingAll: true)
         } catch {
-            errorMessage = "Couldn't load announcements."
+            switch CacheFallback.forList(
+                error, cached: cache?.announcements() ?? [],
+                fallback: "Couldn't load announcements."
+            ) {
+            case .cached(let items):
+                announcements = items
+                // No cursor offline: the server's cursor is opaque and the
+                // cache is not a page of it. Pull-to-refresh is the way back.
+                nextCursor = nil
+                isOffline = true
+                errorMessage = nil
+            case .failed(let message):
+                isOffline = false
+                errorMessage = message
+            }
         }
     }
 

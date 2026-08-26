@@ -15,10 +15,16 @@ final class InformationViewModel {
     private(set) var hasLoadedOnce = false
     var errorMessage: String?
 
-    private let api: BearLakeAPI
+    /// C46. True when what is on screen came from the cache because the
+    /// network failed — drives the banner and disables mutating controls.
+    private(set) var isOffline = false
 
-    init(api: BearLakeAPI) {
+    private let api: BearLakeAPI
+    private let cache: CacheStore?
+
+    init(api: BearLakeAPI, cache: CacheStore? = nil) {
         self.api = api
+        self.cache = cache
     }
 
     var isEmpty: Bool { quickTips.isEmpty && categories.isEmpty }
@@ -31,27 +37,47 @@ final class InformationViewModel {
         // The two sections are independent; one failing should not blank the
         // other, so the first error wins the alert and the rest still loads.
         var firstError: String?
+        var servedFromCache = false
 
         do {
             // Ordered by sortOrder, which the server already applies — the
             // client does not re-sort, so an admin's reordering is the single
             // source of truth.
-            quickTips = try await api.listQuickTips()
-        } catch let error as APIError {
-            firstError = error.message
+            let fetched = try await api.listQuickTips()
+            quickTips = fetched
+            cache?.save(quickTips: fetched)
         } catch {
-            firstError = "Couldn't load the quick tips."
+            switch CacheFallback.forList(
+                error, cached: cache?.quickTips() ?? [],
+                fallback: "Couldn't load the quick tips."
+            ) {
+            case .cached(let items):
+                quickTips = items
+                servedFromCache = true
+            case .failed(let message):
+                firstError = message
+            }
         }
 
         do {
-            categories = try await api.listCategories()
-        } catch let error as APIError {
-            firstError = firstError ?? error.message
+            let fetched = try await api.listCategories()
+            categories = fetched
+            cache?.save(categories: fetched)
         } catch {
-            firstError = firstError ?? "Couldn't load the knowledge base."
+            switch CacheFallback.forList(
+                error, cached: cache?.categories() ?? [],
+                fallback: "Couldn't load the knowledge base."
+            ) {
+            case .cached(let items):
+                categories = items
+                servedFromCache = true
+            case .failed(let message):
+                firstError = firstError ?? message
+            }
         }
 
-        errorMessage = firstError
+        isOffline = servedFromCache
+        errorMessage = servedFromCache ? nil : firstError
     }
 
     // MARK: - Quick tips

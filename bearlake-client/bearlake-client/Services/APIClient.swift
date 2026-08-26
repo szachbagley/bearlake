@@ -197,10 +197,18 @@ actor APIClient: BearLakeAPI {
                 let session = try decoder.decode(SessionResult.self, from: data)
                 try await tokens.store(session)
                 return true
+            } catch let error as APIError where error.is(.network) {
+                // The request never reached the server, so this says nothing
+                // about the token. Clearing here would turn a moment without
+                // signal into a permanent sign-out — and the family uses this
+                // at a lake with patchy coverage. Keep the token; the caller's
+                // request fails as a network error and falls back to the
+                // cache (C46).
+                return false
             } catch {
-                // The refresh token is dead: expired, revoked, or part of a
-                // family the server killed. Clearing is the only safe move —
-                // retrying with it risks tripping theft detection.
+                // The refresh token really is dead: expired, revoked, or part
+                // of a family the server killed. Clearing is the only safe
+                // move — retrying with it risks tripping theft detection.
                 await tokens.clear()
                 await onSessionExpired()
                 return false

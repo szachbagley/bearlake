@@ -26,6 +26,9 @@ actor FakeAPI: BearLakeAPI {
 
     /// When set, the next call to any method throws this instead.
     var nextError: APIError?
+    /// Stays set, unlike `nextError`. A ViewModel that makes several calls
+    /// per load needs every one of them to fail to simulate being offline.
+    var alwaysFails: APIError?
 
     /// Call counts, for asserting a ViewModel did not fetch twice.
     private(set) var callCounts: [String: Int] = [:]
@@ -45,6 +48,7 @@ actor FakeAPI: BearLakeAPI {
     }
 
     func setNextError(_ error: APIError?) { nextError = error }
+    func setAlwaysFails(_ error: APIError?) { alwaysFails = error }
     func setArticle(_ article: InfoArticle) { articles[article.id] = article }
     func setArticleSummaries(_ categoryID: String, _ summaries: [ArticleSummary]) {
         articleSummaries[categoryID] = summaries
@@ -53,6 +57,7 @@ actor FakeAPI: BearLakeAPI {
 
     private func record(_ name: String) throws {
         callCounts[name, default: 0] += 1
+        if let error = alwaysFails { throw error }
         if let error = nextError {
             nextError = nil
             throw error

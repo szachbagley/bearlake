@@ -13,15 +13,26 @@ struct HomeView: View {
     @State private var composing: AnnouncementDraft?
 
     private let api: BearLakeAPI
+    private let cache: CacheStore?
 
-    init(auth: AuthViewModel, api: BearLakeAPI) {
+    init(auth: AuthViewModel, api: BearLakeAPI, cache: CacheStore?) {
         self.auth = auth
         self.api = api
-        _model = State(initialValue: HomeViewModel(api: api))
+        self.cache = cache
+        _model = State(initialValue: HomeViewModel(api: api, cache: cache))
     }
+
+
+    /// C48 still applies: this hides controls, it is not the security
+    /// boundary. Offline it also prevents starting an edit that cannot
+    /// possibly reach the server (C46).
+    private var canMutate: Bool { auth.isAdmin && model.isOffline == false }
 
     var body: some View {
         List {
+            if model.isOffline {
+                Section { OfflineBanner() }
+            }
             announcementsSection
             upcomingSection
         }
@@ -59,7 +70,11 @@ struct HomeView: View {
             if model.announcements.isEmpty {
                 if model.isLoading {
                     ProgressView().frame(maxWidth: .infinity)
-                } else {
+                } else if model.errorMessage == nil {
+                    // Only truthful when the load actually succeeded. A
+                    // failed fetch with nothing cached leaves the list empty
+                    // too, and "there is nothing here" is a different claim
+                    // from "we could not ask" (C46).
                     Text("No announcements yet.")
                         .foregroundStyle(.secondary)
                 }
@@ -78,7 +93,7 @@ struct HomeView: View {
                 // Admin-only affordance. This hides a control; it is NOT the
                 // security boundary — the server independently rejects a
                 // non-admin POST (C48).
-                if auth.isAdmin {
+                if canMutate {
                     Button {
                         composing = AnnouncementDraft(existing: nil)
                     } label: {
@@ -90,7 +105,7 @@ struct HomeView: View {
             }
         } footer: {
             NavigationLink {
-                AllAnnouncementsView(auth: auth, api: api)
+                AllAnnouncementsView(auth: auth, api: api, cache: cache)
             } label: {
                 Text("Older announcements")
             }
@@ -104,7 +119,7 @@ struct HomeView: View {
             if model.upcoming.isEmpty {
                 if model.isLoading {
                     ProgressView().frame(maxWidth: .infinity)
-                } else {
+                } else if model.errorMessage == nil {
                     Text("Nothing on the calendar yet.")
                         .foregroundStyle(.secondary)
                 }
@@ -150,12 +165,16 @@ struct AnnouncementRow: View {
 
 #Preview("Admin") {
     NavigationStack {
-        HomeView(auth: .preview(), api: PreviewAPI())
+        HomeView(auth: .preview(), api: PreviewAPI(), cache: nil)
     }
 }
 
 #Preview("Member") {
     NavigationStack {
-        HomeView(auth: .preview(user: .previewMember), api: PreviewAPI(user: .previewMember))
+        HomeView(
+            auth: .preview(user: .previewMember),
+            api: PreviewAPI(user: .previewMember),
+            cache: nil
+        )
     }
 }

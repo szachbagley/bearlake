@@ -23,19 +23,31 @@ struct ArticleView: View {
         api: BearLakeAPI,
         articleID: String,
         title: String,
-        categories: [InfoCategory] = []
+        categories: [InfoCategory] = [],
+        cache: CacheStore?
     ) {
         self.auth = auth
         self.api = api
         self.categories = categories
         _model = State(
-            initialValue: ArticleViewModel(articleID: articleID, initialTitle: title, api: api)
+            initialValue: ArticleViewModel(
+                articleID: articleID, initialTitle: title, api: api, cache: cache
+            )
         )
     }
+
+
+    /// C48 still applies: this hides controls, it is not the security
+    /// boundary. Offline it also prevents starting an edit that cannot
+    /// possibly reach the server (C46).
+    private var canMutate: Bool { auth.isAdmin && model.isOffline == false }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                if model.isOffline {
+                    OfflineBanner()
+                }
                 if model.isLoading && model.hasLoadedOnce == false {
                     ProgressView().frame(maxWidth: .infinity).padding(.top, 40)
                 } else if model.isEntirelyUnrenderable {
@@ -58,7 +70,7 @@ struct ArticleView: View {
         .toolbar {
             // Admin-only affordance; the server rejects a non-admin PATCH
             // regardless (C48).
-            if auth.isAdmin {
+            if canMutate {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         isEditing = true
@@ -122,7 +134,8 @@ struct ArticleView: View {
     NavigationStack {
         ArticleView(
             auth: .preview(), api: PreviewAPI(),
-            articleID: "a1", title: "Monitoring chemicals"
+            articleID: "a1", title: "Monitoring chemicals",
+            cache: nil
         )
     }
 }

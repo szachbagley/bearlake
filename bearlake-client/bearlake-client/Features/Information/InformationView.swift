@@ -17,11 +17,13 @@ struct InformationView: View {
     @State private var pendingCategoryDeletion: InfoCategory?
 
     private let api: BearLakeAPI
+    private let cache: CacheStore?
 
-    init(auth: AuthViewModel, api: BearLakeAPI) {
+    init(auth: AuthViewModel, api: BearLakeAPI, cache: CacheStore?) {
         self.auth = auth
         self.api = api
-        _model = State(initialValue: InformationViewModel(api: api))
+        self.cache = cache
+        _model = State(initialValue: InformationViewModel(api: api, cache: cache))
     }
 
     /// Identifiable wrappers so `.sheet(item:)` can tell "new" from "editing
@@ -35,8 +37,17 @@ struct InformationView: View {
         var id: String { existing?.id ?? "new" }
     }
 
+
+    /// C48 still applies: this hides controls, it is not the security
+    /// boundary. Offline it also prevents starting an edit that cannot
+    /// possibly reach the server (C46).
+    private var canMutate: Bool { auth.isAdmin && model.isOffline == false }
+
     var body: some View {
         List {
+            if model.isOffline {
+                Section { OfflineBanner() }
+            }
             quickTipsSection
             knowledgeBaseSection
         }
@@ -122,7 +133,11 @@ struct InformationView: View {
             if model.quickTips.isEmpty {
                 if model.isLoading {
                     ProgressView().frame(maxWidth: .infinity)
-                } else {
+                } else if model.errorMessage == nil {
+                    // Only truthful when the load actually succeeded. A
+                    // failed fetch with nothing cached leaves the list empty
+                    // too, and "there is nothing here" is a different claim
+                    // from "we could not ask" (C46).
                     Text("No quick tips yet.").foregroundStyle(.secondary)
                 }
             } else {
@@ -133,7 +148,7 @@ struct InformationView: View {
                         .swipeActions(edge: .trailing) {
                             // Admin-only affordance; the server rejects a
                             // non-admin write regardless (C48).
-                            if auth.isAdmin {
+                            if canMutate {
                                 Button(role: .destructive) {
                                     pendingTipDeletion = tip
                                 } label: {
@@ -153,7 +168,7 @@ struct InformationView: View {
             HStack {
                 Text("Quick tips")
                 Spacer()
-                if auth.isAdmin {
+                if canMutate {
                     Button {
                         editingTip = QuickTipDraft(existing: nil)
                     } label: {
@@ -172,18 +187,18 @@ struct InformationView: View {
             if model.categories.isEmpty {
                 if model.isLoading {
                     ProgressView().frame(maxWidth: .infinity)
-                } else {
+                } else if model.errorMessage == nil {
                     Text("No categories yet.").foregroundStyle(.secondary)
                 }
             } else {
                 ForEach(model.categories) { category in
                     NavigationLink {
-                        CategoryView(auth: auth, api: api, category: category)
+                        CategoryView(auth: auth, api: api, category: category, cache: cache)
                     } label: {
                         Text(category.title)
                     }
                     .swipeActions(edge: .trailing) {
-                        if auth.isAdmin {
+                        if canMutate {
                             Button(role: .destructive) {
                                 pendingCategoryDeletion = category
                             } label: {
@@ -203,7 +218,7 @@ struct InformationView: View {
             HStack {
                 Text("Knowledge base")
                 Spacer()
-                if auth.isAdmin {
+                if canMutate {
                     Button {
                         editingCategory = CategoryDraft(existing: nil)
                     } label: {
@@ -218,12 +233,16 @@ struct InformationView: View {
 
 #Preview("Admin") {
     NavigationStack {
-        InformationView(auth: .preview(), api: PreviewAPI())
+        InformationView(auth: .preview(), api: PreviewAPI(), cache: nil)
     }
 }
 
 #Preview("Member") {
     NavigationStack {
-        InformationView(auth: .preview(user: .previewMember), api: PreviewAPI(user: .previewMember))
+        InformationView(
+            auth: .preview(user: .previewMember),
+            api: PreviewAPI(user: .previewMember),
+            cache: nil
+        )
     }
 }

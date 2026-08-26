@@ -13,16 +13,33 @@ struct CategoryView: View {
     @State private var pendingDeletion: ArticleSummary?
 
     private let api: BearLakeAPI
+    private let cache: CacheStore?
 
-    init(auth: AuthViewModel, api: BearLakeAPI, category: InfoCategory) {
+    init(
+        auth: AuthViewModel,
+        api: BearLakeAPI,
+        category: InfoCategory,
+        cache: CacheStore?
+    ) {
         self.auth = auth
         self.api = api
-        _model = State(initialValue: CategoryViewModel(category: category, api: api))
+        self.cache = cache
+        _model = State(initialValue: CategoryViewModel(category: category, api: api, cache: cache))
     }
+
+
+    /// C48 still applies: this hides controls, it is not the security
+    /// boundary. Offline it also prevents starting an edit that cannot
+    /// possibly reach the server (C46).
+    private var canMutate: Bool { auth.isAdmin && model.isOffline == false }
 
     var body: some View {
         List {
-            if model.articles.isEmpty && model.hasLoadedOnce && model.isLoading == false {
+            if model.isOffline {
+                Section { OfflineBanner() }
+            }
+            if model.articles.isEmpty, model.hasLoadedOnce,
+               model.isLoading == false, model.errorMessage == nil {
                 ContentUnavailableView(
                     "No Articles",
                     systemImage: "doc.text",
@@ -41,7 +58,8 @@ struct CategoryView: View {
                         articleID: article.id, title: article.title,
                         // Passed down so the editor's category picker has
                         // something to offer without refetching.
-                        categories: [model.category]
+                        categories: [model.category],
+                        cache: cache
                     )
                 } label: {
                     HStack {
@@ -62,7 +80,7 @@ struct CategoryView: View {
                     .accessibilityElement(children: .combine)
                 }
                 .swipeActions(edge: .trailing) {
-                    if auth.isAdmin {
+                    if canMutate {
                         Button(role: .destructive) {
                             pendingDeletion = article
                         } label: {
@@ -77,7 +95,7 @@ struct CategoryView: View {
         .task { await model.load() }
         .refreshable { await model.load() }
         .toolbar {
-            if auth.isAdmin {
+            if canMutate {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         isNamingNewArticle = true
@@ -141,7 +159,8 @@ struct CategoryView: View {
             category: InfoCategory(
                 id: "cat0", title: "Pool & Hot Tub", sortOrder: 0,
                 createdAt: Date(), updatedAt: Date()
-            )
+            ),
+            cache: nil
         )
     }
 }
@@ -153,7 +172,8 @@ struct CategoryView: View {
             category: InfoCategory(
                 id: "cat0", title: "Pool & Hot Tub", sortOrder: 0,
                 createdAt: Date(), updatedAt: Date()
-            )
+            ),
+            cache: nil
         )
     }
 }

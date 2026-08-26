@@ -14,15 +14,27 @@ struct AllAnnouncementsView: View {
 
     private let api: BearLakeAPI
 
-    init(auth: AuthViewModel, api: BearLakeAPI) {
+    init(auth: AuthViewModel, api: BearLakeAPI, cache: CacheStore?) {
         self.auth = auth
         self.api = api
-        _model = State(initialValue: AnnouncementsViewModel(api: api))
+        _model = State(initialValue: AnnouncementsViewModel(api: api, cache: cache))
     }
+
+
+    /// C48 still applies: this hides controls, it is not the security
+    /// boundary. Offline it also prevents starting an edit that cannot
+    /// possibly reach the server (C46).
+    private var canMutate: Bool { auth.isAdmin && model.isOffline == false }
 
     var body: some View {
         List {
-            if model.announcements.isEmpty && model.hasLoadedOnce && model.isLoading == false {
+            if model.isOffline {
+                Section { OfflineBanner() }
+            }
+            // errorMessage guards against claiming the list is empty when
+            // the fetch failed and there was nothing cached (C46).
+            if model.announcements.isEmpty, model.hasLoadedOnce,
+               model.isLoading == false, model.errorMessage == nil {
                 ContentUnavailableView(
                     "No Announcements",
                     systemImage: "megaphone",
@@ -38,7 +50,7 @@ struct AllAnnouncementsView: View {
                 .swipeActions(edge: .trailing) {
                     // Hidden for members; the server rejects them regardless
                     // (C48).
-                    if auth.isAdmin {
+                    if canMutate {
                         Button(role: .destructive) {
                             pendingDeletion = announcement
                         } label: {
@@ -76,7 +88,7 @@ struct AllAnnouncementsView: View {
         .refreshable { await model.load() }
         .task { await model.load() }
         .toolbar {
-            if auth.isAdmin {
+            if canMutate {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         composing = AnnouncementDraft(existing: nil)
@@ -128,12 +140,16 @@ struct AllAnnouncementsView: View {
 
 #Preview("Admin") {
     NavigationStack {
-        AllAnnouncementsView(auth: .preview(), api: PreviewAPI())
+        AllAnnouncementsView(auth: .preview(), api: PreviewAPI(), cache: nil)
     }
 }
 
 #Preview("Member") {
     NavigationStack {
-        AllAnnouncementsView(auth: .preview(user: .previewMember), api: PreviewAPI(user: .previewMember))
+        AllAnnouncementsView(
+            auth: .preview(user: .previewMember),
+            api: PreviewAPI(user: .previewMember),
+            cache: nil
+        )
     }
 }

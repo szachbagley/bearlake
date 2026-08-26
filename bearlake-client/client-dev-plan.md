@@ -818,6 +818,57 @@ Deferred to here deliberately: caching is only meaningful once there is somethin
 
 ---
 
+#### Phase 10 status — ✅ COMPLETE
+
+**391 tests green, zero warnings.** All five steps, plus four defects the gate exposed.
+
+##### What the cache is, and is not
+
+Read models only, for offline *viewing* (C45). The API stays the source of truth; nothing here is ever written back. Blocks are a JSON blob rather than a model per block type — a per-type schema would have to describe the `unknown` case, which is by definition the one shape this build cannot describe, and the blob round-trips it byte-for-byte (§11.5).
+
+All-day dates stay `String` through the cache too (C22). Storing them as `Date` would have reintroduced the UTC-midnight bug one layer down, where it is harder to see.
+
+##### The decision C46 actually makes
+
+A failed fetch has exactly two outcomes, and only one input decides which: whether the cache has anything. Cached → render it read-only behind the banner. Empty → surface the error, **never an empty list**. "There is nothing here" and "we could not ask" are different claims, and the reassuring one is the wrong default.
+
+Six ViewModels make that call, so it lives in `CacheFallback` once.
+
+##### Pruning, and why events are special
+
+Complete-list endpoints (quick tips, categories, a category's articles) prune to the response — anything missing was deleted. Events prune only within the fetched window, decided by `CabinDate.event(_:fallsOn:)` rather than a hand-rolled string comparison, so all-day and timed events are judged by the same tested rule. Without it a cancelled stay would keep showing offline, and *is the cabin booked* is the question this app exists to answer.
+
+##### Four defects the gate found that the tests could not
+
+The unit tests all passed before any of these were fixed. Each needed the running app.
+
+| Defect | Why it mattered | Status |
+|---|---|---|
+| `restore()` and `refreshSession()` treated a **network failure as a dead token** — clearing the Keychain and signing the user out | Opening the app at the cabin with no signal signed you out *permanently*. Once step 4 landed it destroyed the offline cache too — the thing this phase exists to build. Pre-existing since Phase 2/3; Phase 10 made it fatal | fixed, 2 tests |
+| `CategoryView` never passed `cache` to `ArticleView` | Articles were **never cached at all**. Tests missed it because they inject the store directly into the ViewModel; only the running app exercises the wire | fixed; `cache` is now a **required** parameter on all six views, so a missing wire is a build error |
+| An uncached article rendered *"Nothing here yet. Add some content"* underneath the connection error | Two contradictory claims, and the false one is the reassuring one. Same fix applied to every empty state: it is only truthful when the load succeeded | fixed, 2 tests |
+| `EventDetailView` had **no dismiss control** when `onEdit` was nil | Swipe-to-dismiss only, which is not discoverable for an audience of varying technical ability. Pre-existing (members viewing others' events); Phase 10 made it the path *everyone* takes offline | fixed — a "Done" button |
+
+The first one is the one worth remembering: a network blip and an invalid credential are not the same event, and code that conflates them punishes the user for having bad reception.
+
+##### Gate — verified with the API stopped
+
+| Screen | Banner | Content from cache | Mutating controls |
+|---|---|---|---|
+| Home | ✅ | 2 announcements, 2 upcoming events | `+` gone |
+| Information | ✅ | 2 quick tips, 1 category | both `+` gone; tip rows no longer tappable |
+| Article | ✅ | heading, paragraph, all 3 bullets | `Edit article` gone |
+| Calendar | ✅ | day markers on Aug 28–Sep 2 | `New event` gone; tapping the event gave the **read-only** detail even though the viewer created it |
+
+The cache also survived a relaunch with the server down, which is the restore fix working end to end.
+
+##### Known limitations, deliberately not solved here
+
+- **Launching with no network lands on the login screen.** The access token is memory-only, so a cold start must refresh, and that cannot happen offline. Nothing is destroyed now — the token and cache survive, and the next launch with signal signs in silently — but the offline cache is only reachable within a session that already authenticated. Making it reachable at launch means caching the session identity, which is a different decision from C45 and belongs in Phase 11 if it is wanted.
+- **Offline articles show their photos as unavailable.** Image blocks persist the S3 key, never the presigned URL (C34), and `ImageCache` is in-memory. This is the honest outcome rather than a dead URL, but it is worth knowing before someone reports it as a bug.
+
+---
+
 ### Phase 11 — Hardening, accessibility, and install
 
 **Steps:**

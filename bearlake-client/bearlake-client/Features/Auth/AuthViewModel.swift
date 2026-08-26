@@ -43,9 +43,22 @@ final class AuthViewModel {
     private let api: BearLakeAPI
     private let tokens: TokenStore
 
-    init(api: BearLakeAPI, tokens: TokenStore) {
+    /// Runs whenever a session ends, for either reason.
+    ///
+    /// A closure rather than a `CacheStore`, so auth stays unaware of the
+    /// cache — and typed `@MainActor` deliberately: storing an isolated
+    /// closure in a plain function-type property erases its isolation, which
+    /// in Swift 5 mode is a data race the compiler will not warn about.
+    private let onSignedOut: @MainActor () -> Void
+
+    init(
+        api: BearLakeAPI,
+        tokens: TokenStore,
+        onSignedOut: @escaping @MainActor () -> Void = {}
+    ) {
         self.api = api
         self.tokens = tokens
+        self.onSignedOut = onSignedOut
     }
 
     var currentUser: PublicUser? { state.user }
@@ -69,12 +82,18 @@ final class AuthViewModel {
         do {
             let user = try await api.me()
             state = gatedState(for: user)
+        } catch let error as APIError where error.is(.network) {
+            // Launched with no signal. We cannot tell whether the token is
+            // still good, so keep it *and* the cached content — destroying
+            // either would punish a user for opening the app at the cabin.
+            // Signing in again once there is signal restores the session.
+            state = .signedOut
         } catch {
             // The stored token is dead. `APIClient` has already cleared the
             // Keychain via its refresh failure path; clearing again is
             // harmless and covers a non-401 failure.
             await tokens.clear()
-            state = .signedOut
+            signedOut()
         }
     }
 
@@ -172,7 +191,7 @@ final class AuthViewModel {
     func logout() async {
         try? await api.logout()
         await tokens.clear()
-        state = .signedOut
+        signedOut()
     }
 
     // MARK: - Gate
@@ -186,7 +205,14 @@ final class AuthViewModel {
 
     /// Called when a refresh fails and the session cannot be recovered.
     func sessionExpired() {
+        signedOut()
+    }
+
+    /// Step 4. Every path out of a session runs through here, so the cache
+    /// cannot be emptied on one of them and left behind on the other.
+    private func signedOut() {
         state = .signedOut
+        onSignedOut()
     }
 
     private func gatedState(for user: PublicUser) -> SessionState {
