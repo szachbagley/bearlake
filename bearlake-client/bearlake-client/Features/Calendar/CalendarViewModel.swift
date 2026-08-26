@@ -24,13 +24,24 @@ final class CalendarViewModel {
     private(set) var loadedWindow: (start: String, end: String)?
 
     let dates: CabinDate
+    /// C46. True when what is on screen came from the cache because the
+    /// network failed — drives the banner and disables mutating controls.
+    private(set) var isOffline = false
+
+    private let cache: CacheStore?
     private let api: BearLakeAPI
     private let now: () -> Date
 
-    init(api: BearLakeAPI, dates: CabinDate = CabinDate(), now: @escaping () -> Date = Date.init) {
+    init(
+        api: BearLakeAPI,
+        dates: CabinDate = CabinDate(),
+        now: @escaping () -> Date = Date.init,
+        cache: CacheStore? = nil
+    ) {
         self.api = api
         self.dates = dates
         self.now = now
+        self.cache = cache
 
         // Selection defaults to today on first load (spec §8.3).
         let today = dates.todayDateOnly(now: now())
@@ -139,17 +150,32 @@ final class CalendarViewModel {
         isLoading = true
         defer { isLoading = false }
 
+        let startDay = dates.dateOnlyString(from: window.start)
+        let endDay = dates.dateOnlyString(from: window.end)
+
         do {
-            events = try await api.listEvents(start: window.start, end: window.end)
-            loadedWindow = (
-                dates.dateOnlyString(from: window.start),
-                dates.dateOnlyString(from: window.end)
-            )
+            let fetched = try await api.listEvents(start: window.start, end: window.end)
+            events = fetched
+            loadedWindow = (startDay, endDay)
             errorMessage = nil
-        } catch let error as APIError {
-            errorMessage = error.message
+            isOffline = false
+            cache?.save(events: fetched, window: startDay...endDay)
         } catch {
-            errorMessage = "Couldn't load the calendar."
+            switch CacheFallback.forList(
+                error, cached: cache?.events() ?? [],
+                fallback: "Couldn't load the calendar."
+            ) {
+            case .cached(let cached):
+                events = cached
+                // Deliberately NOT recording loadedWindow: this window was
+                // never actually fetched, and marking it loaded would stop
+                // `loadIfNeeded` from retrying when the network returns.
+                isOffline = true
+                errorMessage = nil
+            case .failed(let message):
+                isOffline = false
+                errorMessage = message
+            }
         }
     }
 
@@ -233,6 +259,9 @@ final class CalendarViewModel {
     var pendingAction: DayAction?
 
     func requestCreate(on dateOnly: String) {
+        // C46: nothing to create against. Opening the editor offline would
+        // let someone fill in a stay and lose it at save.
+        guard isOffline == false else { return }
         pendingAction = .create(dateOnly: dateOnly)
     }
 
@@ -243,6 +272,12 @@ final class CalendarViewModel {
     /// DELETE from anyone else, so a wrong answer here is a cosmetic bug, not
     /// a security hole (C48).
     func requestOpen(_ event: CalendarEvent, as user: PublicUser?) {
+        // Offline, even the creator gets the read-only detail: the event can
+        // still be read, but a save could not reach the server (C46).
+        guard isOffline == false else {
+            pendingAction = .view(event)
+            return
+        }
         pendingAction = canEdit(event, as: user) ? .edit(event) : .view(event)
     }
 

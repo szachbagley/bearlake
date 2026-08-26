@@ -21,11 +21,17 @@ final class CategoryViewModel {
     /// straight into the editor.
     var newlyCreatedArticleID: String?
 
-    private let api: BearLakeAPI
+    /// C46. True when what is on screen came from the cache because the
+    /// network failed — drives the banner and disables mutating controls.
+    private(set) var isOffline = false
 
-    init(category: InfoCategory, api: BearLakeAPI) {
+    private let api: BearLakeAPI
+    private let cache: CacheStore?
+
+    init(category: InfoCategory, api: BearLakeAPI, cache: CacheStore? = nil) {
         self.category = category
         self.api = api
+        self.cache = cache
     }
 
     func load() async {
@@ -36,12 +42,24 @@ final class CategoryViewModel {
             // No client-side status filter (C38). Members are sent published
             // articles only; admins receive both. Filtering here would imply
             // drafts reach a member's device, which they do not.
-            articles = try await api.listArticles(categoryID: category.id)
+            let fetched = try await api.listArticles(categoryID: category.id)
+            articles = fetched
             errorMessage = nil
-        } catch let error as APIError {
-            errorMessage = error.message
+            isOffline = false
+            cache?.save(articleSummaries: fetched, categoryID: category.id)
         } catch {
-            errorMessage = "Couldn't load these articles."
+            switch CacheFallback.forList(
+                error, cached: cache?.articleSummaries(categoryID: category.id) ?? [],
+                fallback: "Couldn't load these articles."
+            ) {
+            case .cached(let items):
+                articles = items
+                isOffline = true
+                errorMessage = nil
+            case .failed(let message):
+                isOffline = false
+                errorMessage = message
+            }
         }
     }
 

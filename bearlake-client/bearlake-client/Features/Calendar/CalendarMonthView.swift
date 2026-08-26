@@ -13,10 +13,10 @@ struct CalendarMonthView: View {
 
     private let api: BearLakeAPI
 
-    init(auth: AuthViewModel, api: BearLakeAPI) {
+    init(auth: AuthViewModel, api: BearLakeAPI, cache: CacheStore? = nil) {
         self.auth = auth
         self.api = api
-        _model = State(initialValue: CalendarViewModel(api: api))
+        _model = State(initialValue: CalendarViewModel(api: api, cache: cache))
     }
 
     /// A window of years around today. The cabin's calendar is not an archive
@@ -38,6 +38,9 @@ struct CalendarMonthView: View {
         // here; the grid scrolling away is fine and expected.
         ScrollView {
             VStack(spacing: 0) {
+                if model.isOffline {
+                    OfflineBanner().padding(.horizontal)
+                }
                 header
                 MonthGrid(
                     days: model.grid,

@@ -4,6 +4,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct BearLakeApp: App {
@@ -11,7 +12,7 @@ struct BearLakeApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView(auth: composition.auth, api: composition.api)
+            RootView(auth: composition.auth, api: composition.api, cache: composition.cache)
                 .task { await composition.auth.restore() }
         }
     }
@@ -30,9 +31,14 @@ struct BearLakeApp: App {
 final class AppComposition {
     let auth: AuthViewModel
     let api: BearLakeAPI
+    /// nil if the store could not be opened. Offline viewing is then
+    /// unavailable, which is a degraded feature rather than a broken app.
+    let cache: CacheStore?
 
     init() {
         let tokens = TokenStore()
+        let cache = CacheStore.makeContainer().map { CacheStore(context: ModelContext($0)) }
+        self.cache = cache
         // A box, so the closures below can reach a ViewModel that does not
         // exist yet at the moment the client is built.
         let holder = AuthHolder()
@@ -48,7 +54,11 @@ final class AppComposition {
             }
         )
 
-        let auth = AuthViewModel(api: client, tokens: tokens)
+        // Step 4: the next user must not inherit this one's content — a
+        // member must never see an admin's cached drafts.
+        let auth = AuthViewModel(api: client, tokens: tokens) { [cache] in
+            cache?.clear()
+        }
         self.auth = auth
         self.api = client
         holder.value = auth
@@ -68,6 +78,7 @@ private final class AuthHolder: @unchecked Sendable {
 struct RootView: View {
     let auth: AuthViewModel
     let api: BearLakeAPI
+    var cache: CacheStore?
 
     var body: some View {
         switch auth.state {
@@ -80,7 +91,7 @@ struct RootView: View {
             // in this state.
             ChangePasswordView(auth: auth, mode: .forced)
         case .signedIn:
-            RootTabView(auth: auth, api: api)
+            RootTabView(auth: auth, api: api, cache: cache)
         }
     }
 }

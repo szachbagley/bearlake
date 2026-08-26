@@ -14,14 +14,23 @@ struct AllAnnouncementsView: View {
 
     private let api: BearLakeAPI
 
-    init(auth: AuthViewModel, api: BearLakeAPI) {
+    init(auth: AuthViewModel, api: BearLakeAPI, cache: CacheStore? = nil) {
         self.auth = auth
         self.api = api
-        _model = State(initialValue: AnnouncementsViewModel(api: api))
+        _model = State(initialValue: AnnouncementsViewModel(api: api, cache: cache))
     }
+
+
+    /// C48 still applies: this hides controls, it is not the security
+    /// boundary. Offline it also prevents starting an edit that cannot
+    /// possibly reach the server (C46).
+    private var canMutate: Bool { auth.isAdmin && model.isOffline == false }
 
     var body: some View {
         List {
+            if model.isOffline {
+                Section { OfflineBanner() }
+            }
             if model.announcements.isEmpty && model.hasLoadedOnce && model.isLoading == false {
                 ContentUnavailableView(
                     "No Announcements",
@@ -38,7 +47,7 @@ struct AllAnnouncementsView: View {
                 .swipeActions(edge: .trailing) {
                     // Hidden for members; the server rejects them regardless
                     // (C48).
-                    if auth.isAdmin {
+                    if canMutate {
                         Button(role: .destructive) {
                             pendingDeletion = announcement
                         } label: {
@@ -76,7 +85,7 @@ struct AllAnnouncementsView: View {
         .refreshable { await model.load() }
         .task { await model.load() }
         .toolbar {
-            if auth.isAdmin {
+            if canMutate {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         composing = AnnouncementDraft(existing: nil)

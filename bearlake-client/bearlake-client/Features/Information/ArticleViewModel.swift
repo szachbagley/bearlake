@@ -19,12 +19,18 @@ final class ArticleViewModel {
     private(set) var hasLoadedOnce = false
     var errorMessage: String?
 
-    private let api: BearLakeAPI
+    /// C46. True when what is on screen came from the cache because the
+    /// network failed — drives the banner and disables mutating controls.
+    private(set) var isOffline = false
 
-    init(articleID: String, initialTitle: String, api: BearLakeAPI) {
+    private let api: BearLakeAPI
+    private let cache: CacheStore?
+
+    init(articleID: String, initialTitle: String, api: BearLakeAPI, cache: CacheStore? = nil) {
         self.articleID = articleID
         self.initialTitle = initialTitle
         self.api = api
+        self.cache = cache
     }
 
     var title: String { article?.title ?? initialTitle }
@@ -50,12 +56,24 @@ final class ArticleViewModel {
         isLoading = true
         defer { isLoading = false; hasLoadedOnce = true }
         do {
-            article = try await api.getArticle(id: articleID)
+            let fetched = try await api.getArticle(id: articleID)
+            article = fetched
             errorMessage = nil
-        } catch let error as APIError {
-            errorMessage = error.message
+            isOffline = false
+            cache?.save(article: fetched)
         } catch {
-            errorMessage = "Couldn't load this article."
+            switch CacheFallback.forItem(
+                error, cached: cache?.article(id: articleID),
+                fallback: "Couldn't load this article."
+            ) {
+            case .cached(let cached):
+                article = cached
+                isOffline = true
+                errorMessage = nil
+            case .failed(let message):
+                isOffline = false
+                errorMessage = message
+            }
         }
     }
 }

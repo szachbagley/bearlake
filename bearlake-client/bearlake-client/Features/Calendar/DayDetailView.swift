@@ -56,13 +56,17 @@ struct DayDetailView: View {
             }
             .accessibilityLabel("Next day")
 
-            Button {
-                onCreate(model.selectedDay)
-            } label: {
-                Image(systemName: "plus")
+            // Hidden rather than disabled offline: a permanently greyed
+            // control invites tapping to find out why (C46).
+            if model.isOffline == false {
+                Button {
+                    onCreate(model.selectedDay)
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel("New event")
+                .padding(.leading, 8)
             }
-            .accessibilityLabel("New event")
-            .padding(.leading, 8)
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -148,7 +152,9 @@ private struct HourRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 if events.isEmpty {
                     // Tapping empty space creates an event on this day
-                    // (storyboard).
+                    // (storyboard). Offline this is a no-op: the ViewModel's
+                    // `requestCreate` refuses, which keeps the decision in
+                    // one place rather than repeating it per gesture.
                     Color.clear
                         .frame(height: 28)
                         .contentShape(Rectangle())

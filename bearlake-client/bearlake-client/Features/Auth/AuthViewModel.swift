@@ -43,9 +43,22 @@ final class AuthViewModel {
     private let api: BearLakeAPI
     private let tokens: TokenStore
 
-    init(api: BearLakeAPI, tokens: TokenStore) {
+    /// Runs whenever a session ends, for either reason.
+    ///
+    /// A closure rather than a `CacheStore`, so auth stays unaware of the
+    /// cache — and typed `@MainActor` deliberately: storing an isolated
+    /// closure in a plain function-type property erases its isolation, which
+    /// in Swift 5 mode is a data race the compiler will not warn about.
+    private let onSignedOut: @MainActor () -> Void
+
+    init(
+        api: BearLakeAPI,
+        tokens: TokenStore,
+        onSignedOut: @escaping @MainActor () -> Void = {}
+    ) {
         self.api = api
         self.tokens = tokens
+        self.onSignedOut = onSignedOut
     }
 
     var currentUser: PublicUser? { state.user }
@@ -172,7 +185,7 @@ final class AuthViewModel {
     func logout() async {
         try? await api.logout()
         await tokens.clear()
-        state = .signedOut
+        signedOut()
     }
 
     // MARK: - Gate
@@ -186,7 +199,14 @@ final class AuthViewModel {
 
     /// Called when a refresh fails and the session cannot be recovered.
     func sessionExpired() {
+        signedOut()
+    }
+
+    /// Step 4. Every path out of a session runs through here, so the cache
+    /// cannot be emptied on one of them and left behind on the other.
+    private func signedOut() {
         state = .signedOut
+        onSignedOut()
     }
 
     private func gatedState(for user: PublicUser) -> SessionState {

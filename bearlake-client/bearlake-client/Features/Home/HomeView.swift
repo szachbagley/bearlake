@@ -13,15 +13,26 @@ struct HomeView: View {
     @State private var composing: AnnouncementDraft?
 
     private let api: BearLakeAPI
+    private let cache: CacheStore?
 
-    init(auth: AuthViewModel, api: BearLakeAPI) {
+    init(auth: AuthViewModel, api: BearLakeAPI, cache: CacheStore? = nil) {
         self.auth = auth
         self.api = api
-        _model = State(initialValue: HomeViewModel(api: api))
+        self.cache = cache
+        _model = State(initialValue: HomeViewModel(api: api, cache: cache))
     }
+
+
+    /// C48 still applies: this hides controls, it is not the security
+    /// boundary. Offline it also prevents starting an edit that cannot
+    /// possibly reach the server (C46).
+    private var canMutate: Bool { auth.isAdmin && model.isOffline == false }
 
     var body: some View {
         List {
+            if model.isOffline {
+                Section { OfflineBanner() }
+            }
             announcementsSection
             upcomingSection
         }
@@ -78,7 +89,7 @@ struct HomeView: View {
                 // Admin-only affordance. This hides a control; it is NOT the
                 // security boundary — the server independently rejects a
                 // non-admin POST (C48).
-                if auth.isAdmin {
+                if canMutate {
                     Button {
                         composing = AnnouncementDraft(existing: nil)
                     } label: {
@@ -90,7 +101,7 @@ struct HomeView: View {
             }
         } footer: {
             NavigationLink {
-                AllAnnouncementsView(auth: auth, api: api)
+                AllAnnouncementsView(auth: auth, api: api, cache: cache)
             } label: {
                 Text("Older announcements")
             }

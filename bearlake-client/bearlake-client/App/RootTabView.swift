@@ -19,27 +19,31 @@ struct RootTabView: View {
         case calendar, home, information
     }
 
+    /// nil when the store could not be built — the app still works, it just
+    /// has no offline copy this launch (C45: the API is the source of truth).
+    var cache: CacheStore?
+
     @State private var selection: Tab = .home
     @State private var isShowingSettings = false
 
     var body: some View {
         TabView(selection: $selection) {
             NavigationStack {
-                CalendarMonthView(auth: auth, api: api)
+                CalendarMonthView(auth: auth, api: api, cache: cache)
                     .toolbar { settingsToolbarItem }
             }
             .tabItem { Label("Calendar", systemImage: "calendar") }
             .tag(Tab.calendar)
 
             NavigationStack {
-                HomeView(auth: auth, api: api)
+                HomeView(auth: auth, api: api, cache: cache)
                     .toolbar { settingsToolbarItem }
             }
             .tabItem { Label("Home", systemImage: "house.fill") }
             .tag(Tab.home)
 
             NavigationStack {
-                InformationView(auth: auth, api: api)
+                InformationView(auth: auth, api: api, cache: cache)
                     .toolbar { settingsToolbarItem }
             }
             .tabItem { Label("Information", systemImage: "lightbulb.fill") }
