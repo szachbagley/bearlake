@@ -316,10 +316,7 @@ final class CalendarViewModel {
     }
 
     var selectedDayLabel: String {
-        guard let components = dates.components(fromDateOnly: selectedDay),
-              let date = dates.calendar.date(from: components)
-        else { return selectedDay }
-        return dates.dateLabel(from: date)
+        dates.dateLabel(forDateOnly: selectedDay)
     }
 
     func rangeLabel(for event: CalendarEvent) -> String {

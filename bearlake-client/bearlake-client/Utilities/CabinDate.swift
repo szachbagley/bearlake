@@ -132,6 +132,18 @@ struct CabinDate: Sendable {
         formatter(dateStyle: .medium, timeStyle: .none)
     }
 
+    /// A date-only string as a display label: "Aug 26, 2026".
+    ///
+    /// The `components → date → format` dance was written out at three call
+    /// sites. It is short, which is exactly why it spreads — and C27 says
+    /// this conversion lives in one place.
+    func dateLabel(forDateOnly value: String) -> String {
+        guard let components = components(fromDateOnly: value),
+              let date = calendar.date(from: components)
+        else { return value }
+        return dateLabel(from: date)
+    }
+
     /// A full spoken date for one grid cell: "Saturday, August 1".
     ///
     /// The month grid's visible cells are bare numbers, which is right on

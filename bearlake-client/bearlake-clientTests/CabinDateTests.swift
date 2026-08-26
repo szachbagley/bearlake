@@ -336,3 +336,31 @@ struct SpokenDayLabelTests {
         #expect(label.contains("Friday"), "2027-01-01 is a Friday")
     }
 }
+
+// MARK: - dateLabel(forDateOnly:) (Phase 11, step 4)
+
+struct DateOnlyLabelTests {
+    /// The consolidation of three call sites. The property that matters is
+    /// the same one as everywhere else in this file: a date-only string is
+    /// text, and formatting it must not move it (C22).
+    @Test("a date-only label does not shift by timezone", arguments: [
+        "America/Denver", "America/New_York", "UTC", "Asia/Tokyo", "Pacific/Kiritimati",
+    ])
+    func labelDoesNotShift(zone: String) throws {
+        let dates = CabinDate(
+            timeZone: try #require(TimeZone(identifier: zone)),
+            locale: Locale(identifier: "en_US")
+        )
+        let label = dates.dateLabel(forDateOnly: "2026-08-26")
+        #expect(label.contains("26"), "\(zone): the day must not move")
+        #expect(label.contains("Aug"), "\(zone): the month must not move")
+        #expect(label.contains("2026"))
+    }
+
+    @Test("a malformed date-only string falls back to itself rather than a wrong date")
+    func malformedFallsBack() throws {
+        let dates = CabinDate(timeZone: try #require(TimeZone(identifier: "America/Denver")))
+        #expect(dates.dateLabel(forDateOnly: "2026-13-01") == "2026-13-01")
+        #expect(dates.dateLabel(forDateOnly: "") == "")
+    }
+}

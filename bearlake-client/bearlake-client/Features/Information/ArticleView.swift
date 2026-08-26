@@ -44,7 +44,14 @@ struct ArticleView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
+            // Lazy, not a plain VStack: a plain one builds every block the
+            // moment the article opens. A long article is one thing, but an
+            // article with several photos would fire every image load at
+            // once regardless of what is on screen. Rebuilding on scroll-back
+            // is safe precisely because `ImageCache` is keyed by the S3 key
+            // rather than the rotating presigned URL (C35) — the second load
+            // is a cache hit.
+            LazyVStack(alignment: .leading, spacing: 12) {
                 if model.isOffline {
                     OfflineBanner()
                 }
