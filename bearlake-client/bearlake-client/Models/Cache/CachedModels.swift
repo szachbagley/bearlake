@@ -276,6 +276,12 @@ final class CachedArticle {
 // MARK: - Schema
 
 enum CacheSchema {
+    /// Tripwire for `CacheStore.clear()`, which must list these concretely
+    /// rather than looping this array — see the comment there. A test asserts
+    /// this count, so adding a `@Model` without updating `clear()` fails
+    /// rather than silently leaving one table full after sign-out.
+    static let modelCount = 6
+
     /// Every `@Model` type in the store. `ModelContainer` needs the full list;
     /// omitting one makes its inserts fail at runtime rather than at build.
     static let models: [any PersistentModel.Type] = [
