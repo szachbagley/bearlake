@@ -1,0 +1,3879 @@
+▗ ▗   ▖ ▖  Claude Code v2.1.241
+           Opus 5 · Claude Pro
+  ▘▘ ▝▝    ~/bearlake/bearlake-client
+
+
+✻ Conversation compacted (ctrl+o for history)
+
+
+⏺ Phase 9 complete. PR #29 (https://github.com/szachbagley/bearlake/pull/29) —
+  344 tests green, zero warnings.
+
+  The upload works end to end against real S3
+
+  A 2400×1600 PNG picked from the photo library arrived in S3 as a 2000×1333 
+  JPEG — capped, aspect preserved, re-encoded per C41.
+
+  The bit I'd point at: after publishing and relaunching, the photo rendered
+  from a fresh presigned URL — a different URL than existed when the block was
+  written. That's the key-not-URL design proven end to end rather than argued.
+
+  And the successful PUT is itself the C42 proof. S3 rejects a mismatch between
+  the signed Content-Length and the bytes actually sent, so an accepted upload
+  means the declared post-downscale count was right. Object deleted after;
+  bucket empty.
+
+  The rule earned its keep
+
+  Array.move(fromOffsets:) and remove(atOffsets:) live in SwiftUI — so using
+  them in the ViewModel simply failed to build. "ViewModels don't import
+  SwiftUI" turned out to be load-bearing, not a style note. I implemented both
+  on Foundation with tests for moving down, up, several at once, and a no-op
+  move.
+
+  On the round-trip requirement
+
+  Three tests, and the one I'd defend hardest is "an unknown block is never 
+  validated." An unknown block has no rules this build knows — validating it
+  would make a future block type render an article unsaveable on an older phone.
+  That's worse than not displaying it.
+
+  Something worth knowing for later
+
+  PhotosPicker runs out of process, so it's invisible to snapshot_ui and no
+  elementRef tool can touch it. The bundled axe binary takes raw coordinates
+  instead. Recorded in the plan.
+
+  It also confirmed C40: the picker opened with "Private Access to Photos" and
+  no permission prompt.
+
+  Two mistakes of mine
+
+  An actor-isolated property mutated from outside its actor, and a test image
+  built at device scale so a "800×600" was really 2400×1800 — the assertion was
+  measuring the wrong thing. Both caught by tests.
+
+  /code-review is still running — I'll report what it finds when it lands, and
+  fix anything real before you merge.
+
+✻ Baked for 20m 58s
+
+⏺ Agent "/code-review Review the Phase 9 diff on branch cl…" finished · 5m 39s
+
+⏺ The review found real problems. Let me start by verifying the highest-severity
+  one empirically rather than reasoning about it — my gate exercised "Add
+  photo" but never tapped a block row.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-server
+      npm run dev > /Users/zachbagley/.claude/jobs/ef790223/tmp/s14.log 2>&1 &…)
+  ⎿    article: Row tap check with 2 blocks
+  ⎿  Referenced file bearlake-client/client-dev-plan.md
+  ⎿  Read bearlake-client/bearlake-client/App/BearLakeApp.swift (107 lines)
+  ⎿  Read bearlake-client/bearlake-clientTests/ToolchainTests.swift (24 lines)
+  ⎿  Read bearlake-client/Info.plist (25 lines)
+  ⎿  Read bearlake-client/.gitignore (22 lines)
+
+  Called xcodebuild 3 times (ctrl+o to expand)
+
+⏺ Already signed in. Navigating to the article editor.
+
+  Called xcodebuild 4 times (ctrl+o to expand)
+
+⏺ The tree is already suggestive: each block row exposes "Reorder Remove"
+  (e120/e130), not a tappable content button. Let me tap the heading row.
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ The sheet did open — e182 is a text field holding "A heading to tap", with
+  Cancel/Done and a "16 / 200" counter. Finding #1 is refuted. Let me confirm
+  visually.
+
+  Read 1 file, called xcodebuild (ctrl+o to expand)
+
+⏺ Confirmed — the sheet opens focused with the caret in the field. Finding #1 is
+  refuted. Now let me check finding #5, which claims the draft note hides the
+  validation message.
+
+  Called xcodebuild 2 times (ctrl+o to expand)
+
+⏺ Menu tap didn't register (screen hash unchanged), but finding #5 is
+  deterministic from the source — the snapshot already confirms status is Draft
+  and the draft note occupies the footer. Let me read the code.
+
+  Read 3 files (ctrl+o to expand)
+
+⏺ Empirically: finding #1 is wrong. The rest need code. Let me look at the
+  remaining files.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== BlockEditorSheet 140-165 ==="; sed -n '140,165p'
+      Features/Information/Blocks/BlockEditor…)
+  ⎿  === BlockEditorSheet 140-165 ===
+                     }
+                     .disabled(items.count >= Limits.bulletItemsMax)
+     … +97 lines (ctrl+o to expand)
+
+⏺ Now the fixes. Starting with the upload-progress race and the save paths.
+
+  Read 1 file (ctrl+o to expand)
+⏺ Update(bearlake-client/Services/ImageCache.swift)
+  ⎿  Added 15 lines
+      72  
+      73      func cachedImage(forKey key: String) -> UIImage? { cached[k
+          ey] }
+      74  
+      75 +    /// Seeds the cache with bytes we already hold, so a photo 
+         +just uploaded                                                  
+      76 +    /// renders immediately under its new key.                 
+      77 +    ///                                                        
+      78 +    /// Without this the editor shows "Photo unavailable" for e
+         +very freshly                                                   
+      79 +    /// added photo: the block carries a key but no presigned U
+         +RL until the                                                   
+      80 +    /// article is saved and read back, and there is nothing to
+         + fetch from.                                                   
+      81 +    /// The bytes are the exact JPEG that went to S3, so this i
+         +s the same                                                     
+      82 +    /// image the next read would return.                      
+      83 +    @discardableResult                                         
+      84 +    func insert(_ data: Data, forKey key: String) -> Bool {    
+      85 +        guard let image = UIImage(data: data) else { return fal
+         +se }                                                           
+      86 +        store(image, forKey: key)                              
+      87 +        return true                                            
+      88 +    }                                                          
+      89 +                                                               
+      90      var count: Int { cached.count }
+      91  
+      92      func clear() {
+
+⏺ Now the ViewModel — the upload race, canSave, the silent save, the pasteboard
+  payload, and categories.
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorViewModel.swift)
+  ⎿  Added 15 lines, removed 1 line
+      37      /// the dismiss warning.
+      38      private(set) var isDirty = false
+      39  
+      40 +    /// Categories the article can be moved to, loaded alongsid
+         +e it.                                                          
+      41 +    private(set) var categories: [InfoCategory] = []           
+      42 +                                                               
+      43      private let api: BearLakeAPI
+      44      private let uploader: ImageUploader
+      45 +    private let cache: ImageCache?                             
+      46  
+      43 -    init(articleID: String, api: BearLakeAPI, uploader: ImageUp
+         -loader? = nil) {                                               
+      47 +    /// Identifies the current upload so a late progress callba
+         +ck from a                                                      
+      48 +    /// previous one cannot resurrect `uploadProgress`. See `ad
+         +dPhoto`.                                                       
+      49 +    private var uploadGeneration = 0                           
+      50 +                                                               
+      51 +    init(                                                      
+      52 +        articleID: String,                                     
+      53 +        api: BearLakeAPI,                                      
+      54 +        uploader: ImageUploader? = nil,                        
+      55 +        cache: ImageCache? = nil                               
+      56 +    ) {                                                        
+      57          self.articleID = articleID
+      58          self.api = api
+      59          self.uploader = uploader ?? ImageUploader(api: api)
+      60 +        self.cache = cache                                     
+      61      }
+      62  
+      63      // MARK: - Load
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ The UIKit diagnostic is SourceKit noise — that import predates my change and
+  the target builds. Continuing with load():
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorViewModel.swift)
+  ⎿  Added 4 lines
+      70              let article = try await api.getArticle(id: articleI
+          D)
+      71              apply(article)
+      72              errorMessage = nil
+      73 +            // Secondary, and deliberately not fatal: without i
+         +t the picker                                                   
+      74 +            // falls back to showing only the current category,
+         + which is the                                                  
+      75 +            // old behaviour rather than a broken screen.      
+      76 +            categories = (try? await api.listCategories()) ?? [
+         +]                                                              
+      77          } catch let error as APIError {
+      78              errorMessage = error.message
+      79          } catch {
+
+⏺ Now the upload race — the core of finding #2:
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorViewModel.swift)
+  ⎿  Added 20 lines, removed 4 lines
+      173      /// Uploads a picked photo and appends an image block hold
+           ing the returned
+      174      /// **key**. The presigned URL is never stored (C34).
+      175      func addPhoto(_ data: Data) async {
+      176 +        // The progress callback arrives on URLSession's deleg
+          +ate queue and                                                 
+      177 +        // hops to the MainActor as its own Task, so it is not
+          + ordered against                                              
+      178 +        // this function's resumption: the final 1.0 can land 
+          +*after* the                                                   
+      179 +        // cleanup below and strand `uploadProgress` at a non-
+          +nil value                                                     
+      180 +        // forever, which permanently disables the photo picke
+          +r. Stamping each                                              
+      181 +        // upload and ignoring callbacks from stale generation
+          +s makes the                                                   
+      182 +        // ordering irrelevant.                               
+      183 +        uploadGeneration += 1                                 
+      184 +        let generation = uploadGeneration                     
+      185          uploadProgress = 0
+      177 -        defer { uploadProgress = nil }                        
+      186 +        defer { if generation == uploadGeneration { uploadProg
+          +ress = nil } }                                                
+      187          do {
+      179 -            let key = try await uploader.upload(data, articleI
+          -D: articleID) { [weak self] value in                          
+      180 -                Task { @MainActor [weak self] in self?.uploadP
+          -rogress = value }                                             
+      188 +            let prepared = try await uploader.upload(data, art
+          +icleID: articleID) { [weak self] value in                     
+      189 +                Task { @MainActor [weak self] in              
+      190 +                    guard let self, generation == self.uploadG
+          +eneration else { return }                                     
+      191 +                    self.uploadProgress = value               
+      192 +                }                                             
+      193              }
+      194 +            // Seed the cache with the exact bytes that went t
+          +o S3 so the new                                               
+      195 +            // block previews immediately; the block itself st
+          +ill carries only                                              
+      196 +            // the key (C34, C35).                            
+      197 +            await cache?.insert(prepared.data, forKey: prepare
+          +d.key)                                                        
+      198              // url is nil: this block has never been read back
+            from the API,
+      199              // so there is no presigned URL yet. The next load
+            supplies one.
+      184 -            blocks.append(.image(id: Block.newID(), key: key, 
+          -caption: nil, url: nil))                                      
+      200 +            blocks.append(.image(id: Block.newID(), key: prepa
+          +red.key, caption: nil, url: nil))                             
+      201              isDirty = true
+      202          } catch let error as ImageUploadError {
+      203              errorMessage = error.message
+
+⏺ That changes the uploader's return type — it needs to hand back the bytes too.
+  Let me look at it.
+
+  Read 1 file (ctrl+o to expand)
+  ⎿  Found 10 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ SourceKit has lost the module index (it can't even find Block) — I'll trust
+  the real build. Now the uploader returns the key only; it needs to return the
+  bytes as well, and the size cap needs moving.
+
+⏺ Update(bearlake-client/Services/ImageUpload.swift)
+  ⎿  Added 10 lines, removed 4 lines
+      145          self.put = put
+      146      }
+      147  
+      148 -    /// - Returns: the S3 key to store on the block. The presi
+          -gned URL is                                                   
+      149 -    ///   deliberately not returned — it expires, and only the
+          - key is                                                       
+      150 -    ///   persisted (C34).                                    
+      148 +    /// What a finished upload hands back: the S3 key to store
+          + on the block,                                                
+      149 +    /// and the exact bytes that were sent so a caller can see
+          +d an image cache                                              
+      150 +    /// without re-fetching them. The presigned URL is deliber
+          +ately absent —                                                
+      151 +    /// it expires, and only the key is persisted (C34).      
+      152 +    struct Uploaded: Equatable {                              
+      153 +        let key: String                                       
+      154 +        let data: Data                                        
+      155 +    }                                                         
+      156 +                                                              
+      157      func upload(
+      158          _ data: Data,
+      159          articleID: String,
+      160          onProgress: @escaping @Sendable (Double) -> Void = { _
+            in }
+      155 -    ) async throws -> String {                                
+      161 +    ) async throws -> Uploaded {                              
+      162          let prepared = try ImageProcessing.prepare(data)
+      163  
+      164          // The presigned PUT signs Content-Type AND Content-Le
+           ngth, so the
+
+⏺ Update(bearlake-client/Services/ImageUpload.swift)
+  ⎿  Added 1 line, removed 1 line
+      185          guard (200..<300).contains(status) else {
+      186              throw ImageUploadError.uploadFailed(status: status
+           )
+      187          }
+      188 -        return presign.key                                    
+      188 +        return Uploaded(key: presign.key, data: prepared.data)
+      189      }
+      190  
+      191      /// A silent multi-second upload on cellular reads as a fr
+           ozen app, so
+
+⏺ Now the size cap — finding #6. It currently rejects photos the server would
+  have accepted:
+
+⏺ Update(bearlake-client/Services/ImageUpload.swift)
+  ⎿  Added 4 lines, removed 1 line
+      82          else {
+      83              throw ImageUploadError.unsupportedType(detectedCont
+          entType(of: data))
+      84          }
+      85 -        guard data.count <= Limits.maxUploadBytes else {       
+      85 +        // A decode-safety ceiling, not the upload limit: refus
+         +e to hand                                                      
+      86 +        // ImageIO something absurd. The real cap is applied be
+         +low, to the                                                    
+      87 +        // bytes actually sent.                                
+      88 +        guard data.count <= Limits.maxDecodeBytes else {       
+      89              throw ImageUploadError.tooLarge(bytes: data.count)
+      90          }
+      91  
+
+⏺ Update(bearlake-client/Services/ImageUpload.swift)
+  ⎿  Added 9 lines
+      122              throw ImageUploadError.encodingFailed
+      123          }
+      124  
+      125 +        // The cap the server enforces applies to contentLengt
+          +h — the                                                       
+      126 +        // post-downscale JPEG — so it belongs here, after the
+          + re-encode.                                                   
+      127 +        // Checking the original instead rejected photos that 
+          +would have                                                    
+      128 +        // uploaded comfortably: a 12 MB panorama becomes a fe
+          +w hundred KB at                                               
+      129 +        // 2000 px / q0.85, and the family's phones produce ex
+          +actly that.                                                   
+      130 +        guard output.length <= Limits.maxUploadBytes else {   
+      131 +            throw ImageUploadError.tooLarge(bytes: output.leng
+          +th)                                                           
+      132 +        }                                                     
+      133 +                                                              
+      134          return Prepared(
+      135              data: output as Data,
+      136              // Always JPEG: iOS decodes HEIC natively, so the 
+           client that most
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      grep -n "maxUploadBytes\|maxDecodeBytes" Utilities/*.swift Models/*.swift
+      Services/*.swift 2>/dev/…)
+  ⎿  Models/Limits.swift:62:    static let maxUploadBytes = 10 * 1024 * 102
+     4
+     Services/ImageUpload.swift:88:        guard data.count <= Limits.maxDe
+     … +3 lines (ctrl+o to expand)
+  ⎿  Found 6 new diagnostic issues in 1 file (ctrl+o to expand)
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Update(bearlake-client/Models/Limits.swift)
+  ⎿  Added 8 lines, removed 1 line
+      58      /// others are here because the list is part of the contrac
+          t.
+      59      static let allowedUploadContentTypes = ["image/jpeg", "imag
+          e/png", "image/heic"]
+      60  
+      61 -    /// 10 MB. Clients downscale well below this before uploadi
+         -ng.                                                            
+      61 +    /// 10 MB. The server applies this to `contentLength`, so t
+         +he client must                                                 
+      62 +    /// apply it to the **post-downscale** bytes too — checking
+         + the original                                                  
+      63 +    /// would reject photos that upload fine at a few hundred K
+         +B.                                                             
+      64      static let maxUploadBytes = 10 * 1024 * 1024
+      65  
+      66 +    /// A far looser ceiling on what we will hand to the image 
+         +decoder, so a                                                  
+      67 +    /// pathological input cannot exhaust memory before it is d
+         +ownscaled.                                                     
+      68 +    /// Not the upload limit — that is `maxUploadBytes`, applie
+         +d after.                                                       
+      69 +    static let maxDecodeBytes = 100 * 1024 * 1024              
+      70 +                                                               
+      71      // MARK: - Events
+      72  
+      73      static let eventTitleMin = 1
+
+⏺ Now the remaining ViewModel fixes — canSave, the silent save, and the
+  pasteboard payload:
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorViewModel.swift)
+  ⎿  Added 7 lines, removed 1 line
+      258          return nil
+      259      }
+      260  
+      261 -    var canSave: Bool { validationProblem == nil && isSaving =
+          -= false && isDirty }                                          
+      261 +    /// `uploadProgress` is part of this: saving mid-upload di
+          +smisses the                                                   
+      262 +    /// editor, and when the PUT finally lands `addPhoto` appe
+          +nds the block to                                              
+      263 +    /// a ViewModel nobody is showing. The photo silently neve
+          +r reaches the                                                 
+      264 +    /// article and the S3 object is orphaned.                
+      265 +    var canSave: Bool {                                       
+      266 +        validationProblem == nil && isSaving == false && isDir
+          +ty && uploadProgress == nil                                   
+      267 +    }                                                         
+      268  
+      269      // MARK: - Save (step 7)
+      270  
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorViewModel.swift)
+  ⎿  Added 10 lines, removed 2 lines
+      271      /// - Returns: true when the article saved.
+      272      @discardableResult
+      273      func save() async -> Bool {
+      274 -        guard validationProblem == nil, let updatedAt = loaded
+          -UpdatedAt else {                                              
+      275 -            errorMessage = validationProblem                  
+      274 +        if let problem = validationProblem {                  
+      275 +            errorMessage = problem                            
+      276              return false
+      277          }
+      278 +        // No token means the load never succeeded. Saving wou
+          +ld either                                                     
+      279 +        // overwrite blindly or be rejected, and returning qui
+          +etly would make                                               
+      280 +        // Save look broken — the button would simply do nothi
+          +ng.                                                           
+      281 +        guard let updatedAt = loadedUpdatedAt else {          
+      282 +            errorMessage = "This article hasn't finished loadi
+          +ng yet. "                                                     
+      283 +                + "Close and reopen it, then try again."      
+      284 +            return false                                      
+      285 +        }                                                     
+      286          isSaving = true
+      287          defer { isSaving = false }
+      288  
+⏺ Update(bearlake-client/Features/Information/ArticleEditorViewModel.swift)
+  ⎿  Added 17 lines, removed 4 lines
+      318  
+      319      // MARK: - Conflict resolution (C39)
+      320  
+      321 -    /// The local blocks as JSON, for "Copy my changes" — so a
+          -n admin whose                                                 
+      322 -    /// edits are about to be discarded can keep them.        
+      323 -    func blocksJSONForPasteboard() -> String? {               
+      321 +    /// The local edits as JSON, for "Copy my changes" — so an
+          + admin whose                                                  
+      322 +    /// work is about to be discarded can keep it.            
+      323 +    ///                                                       
+      324 +    /// Carries the title, status, and category as well as the
+          + blocks: the                                                  
+      325 +    /// button promises to copy *your changes*, and the reload
+          + that follows                                                 
+      326 +    /// discards all four. Copying only the blocks quietly los
+          +es a retitling.                                               
+      327 +    func changesJSONForPasteboard() -> String? {              
+      328 +        struct Snapshot: Encodable {                          
+      329 +            let title: String                                 
+      330 +            let status: ArticleStatus                         
+      331 +            let categoryId: String                            
+      332 +            let blocks: [Block]                               
+      333 +        }                                                     
+      334          let encoder = APICoding.makeEncoder()
+      335          encoder.outputFormatting = [.prettyPrinted, .sortedKey
+           s]
+      326 -        guard let data = try? encoder.encode(blocks) else { re
+          -turn nil }                                                    
+      336 +        let snapshot = Snapshot(                              
+      337 +            title: title, status: status, categoryId: category
+          +ID, blocks: blocks                                            
+      338 +        )                                                     
+      339 +        guard let data = try? encoder.encode(snapshot) else { 
+          +return nil }                                                  
+      340          return String(data: data, encoding: .utf8)
+      341      }
+      342  
+
+⏺ Now the view: footer ordering, the swallowed photo error, load-guard, and
+  passing the cache down.
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorView.swift)
+  ⎿  Added 6 lines, removed 3 lines
+      142              }
+      143              .pickerStyle(.segmented)
+      144          } footer: {
+      145 -            if model.status == .draft {                       
+      146 -                Text("Drafts are only visible to admins.")    
+      147 -            } else if let problem = model.validationProblem { 
+      145 +            // Validation first. Articles are authored as draf
+          +ts, so a draft                                                
+      146 +            // note in front of it would hide the message in e
+          +xactly the state                                              
+      147 +            // that needs it — Save greys out with nothing exp
+          +laining why.                                                  
+      148 +            if let problem = model.validationProblem {        
+      149                  Text(problem).foregroundStyle(.red)
+      150 +            } else if model.status == .draft {                
+      151 +                Text("Drafts are only visible to admins.")    
+      152              } else if model.isDirty {
+      153                  Text("Unsaved changes.")
+      154              }
+  ⎿  Found 10 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorView.swift)
+  ⎿  Added 13 lines, removed 1 line
+       92              .onChange(of: photoItem) { _, item in
+       93                  guard let item else { return }
+       94                  Task {
+       95 -                    if let data = try? await item.loadTransfer
+          -able(type: Data.self) {                                       
+       95 +                    do {                                      
+       96 +                        // A nil payload is a real outcome, no
+          +t just an error:                                              
+       97 +                        // an iCloud asset that fails to downl
+          +oad comes back                                                
+       98 +                        // empty. Either way the user tapped a
+          + photo and must                                               
+       99 +                        // not be met with silence.           
+      100 +                        guard let data = try await item.loadTr
+          +ansferable(type: Data.self) else {                            
+      101 +                            model.errorMessage = "That photo c
+          +ouldn't be loaded. "                                          
+      102 +                                + "If it's stored in iCloud, o
+          +pen it in Photos first."                                      
+      103 +                            photoItem = nil                   
+      104 +                            return                            
+      105 +                        }                                     
+      106                          await model.addPhoto(data)
+      107 +                    } catch {                                 
+      108 +                        model.errorMessage = "That photo could
+          +n't be loaded."                                               
+      109                      }
+      110                      photoItem = nil
+      111                  }
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorView.swift)
+  ⎿  Added 15 lines, removed 1 line
+      18      @State private var photoItem: PhotosPickerItem?
+      19      @State private var isConfirmingDiscard = false
+      20  
+      21 +    /// Shared with the article view behind it, so a photo it a
+         +lready fetched                                                 
+      22 +    /// is not downloaded again when its block is opened for a 
+         +caption (C35).                                                 
+      23 +    private let cache: ImageCache                              
+      24 +                                                               
+      25      init(
+      26          articleID: String,
+      27          api: BearLakeAPI,
+      28          categories: [InfoCategory],
+      29 +        cache: ImageCache,                                     
+      30          onFinished: @escaping @MainActor () -> Void
+      31      ) {
+      27 -        _model = State(initialValue: ArticleEditorViewModel(art
+         -icleID: articleID, api: api))                                  
+      32 +        _model = State(initialValue: ArticleEditorViewModel(   
+      33 +            articleID: articleID, api: api, cache: cache       
+      34 +        ))                                                     
+      35          self.categories = categories
+      36 +        self.cache = cache                                     
+      37          self.onFinished = onFinished
+      38      }
+      39  
+      40 +    /// The editor loads the full list so an article can be mov
+         +ed between                                                     
+      41 +    /// categories; the list passed in is the fallback until th
+         +at lands.                                                      
+      42 +    private var pickerCategories: [InfoCategory] {             
+      43 +        model.categories.isEmpty ? categories : model.categorie
+         +s                                                              
+      44 +    }                                                          
+      45 +                                                               
+      46      var body: some View {
+      47          NavigationStack {
+      48              List {
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  view patched
+     33:            articleID: articleID, api: api, cache: cache
+     42:    private var pickerCategories: [InfoCategory] {
+     … +4 lines (ctrl+o to expand)
+
+⏺ Now the load-guard (#11) and the sheet's cache parameter:
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorView.swift)
+  ⎿  Added 10 lines
+      50                  blocksSection
+      51                  addSection
+      52              }
+      53 +            // Editing before the load returns is a silent data
+         +-loss path: the                                                
+      54 +            // response overwrites whatever was typed and reset
+         +s isDirty, so                                                  
+      55 +            // there is not even an unsaved-changes warning. Th
+         +e toolbar stays                                                
+      56 +            // live, so Cancel still works.                    
+      57 +            .disabled(model.hasLoadedOnce == false)            
+      58 +            .overlay {                                         
+      59 +                if model.hasLoadedOnce == false {              
+      60 +                    ProgressView().accessibilityLabel("Loading 
+         +article")                                                      
+      61 +                }                                              
+      62 +            }                                                  
+      63              .navigationTitle("Edit Article")
+      64              .navigationBarTitleDisplayMode(.inline)
+      65              .task { await model.load() }
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== BlockEditorSheet head ==="; sed -n '1,45p'
+      Features/Information/Blocks/BlockEditorSheet.…)
+  ⎿  === BlockEditorSheet head ===
+     //
+     //  BlockEditorSheet.swift
+     … +53 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  BlockEditorSheet patched
+     ArticleView patched
+     Features/Information/Blocks/CachedAsyncImage.swift:85:    CachedAsyncI
+     … +7 lines (ctrl+o to expand)
+  ⎿  Found 10 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Previews aside, let me build and let the compiler find the call sites.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild build -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -…)
+  ⎿  /Users/zachbagley/bearlake/bearlake-client/bearlake-client/Features/In
+     formation/Blocks/BlockEditorSheet.swift:211:80: error: missing argumen
+     t for parameter 'cache' in call
+     … +4 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '205,222p' Features/Information/Blocks/BlockEditorSheet.swift)
+  ⎿          }
+         }
+     }
+     … +16 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  ok
+     /Users/zachbagley/bearlake/bearlake-client/bearlake-client/Features/In
+     formation/ArticleEditorView.swift:297:11: error: missing argument for
+     … +2 lines (ctrl+o to expand)
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorView.swift)
+  ⎿  Added 1 line
+      295              id: "cat0", title: "Pool & Hot Tub", sortOrder: 0,
+      296              createdAt: Date(), updatedAt: Date()
+      297          )],
+      298 +        cache: ImageCache(),                                  
+      299          onFinished: {}
+      300      )
+      301  }
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild build -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -…)
+  ⎿  ---build done---
+  ⎿  (timeout 10m)
+
+⏺ App target builds clean. Now the tests, which reference the changed
+  signatures:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -E…)
+  ⎿  /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests/ImageU
+     ploadTests.swift:229:21: error: value of type 'ImageUploader.Uploaded'
+      has no member 'hasPrefix'
+     … +9 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+  ⎿  Found 10 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      sed -n '218,240p' ImageUploadTests.swift)
+  ⎿          #expect(put.request.value(forHTTPHeaderField: "Content-Type")
+     == "image/jpeg")
+             #expect(presign.contentType == "image/jpeg", "signed type matc
+     … +21 lines (ctrl+o to expand)
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+     ImageUploadTests.swift:209:        _ = try await uploader.upload(origi
+     nal, articleID: "art-1")
+     … +12 lines (ctrl+o to expand)
+
+⏺ Line 259 is the size-cap test — its premise changed. Let me look:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      sed -n '250,268p' ImageUploadTests.swift…)
+  ⎿      @Test("an oversize photo is rejected before any presign call")
+         func rejectsOversizeBeforePresign() async throws {
+             let recorder = UploadRecorder()
+     … +37 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+     /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests/Articl
+     eEditorTests.swift:385:39: error: value of type 'ArticleEditorViewMode
+     … +7 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      sed -n '372,400p' ArticleEditorTests.swift)
+  ⎿          #expect(model.errorMessage == nil, "the conflict prompt replac
+     es the generic alert")
+             #expect(await api.patches.count == 1, "it tried exactly once a
+     … +26 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+     Test case 'YouTubeTests/rejectsJunk(input:)' passed on 'Clone 1 of iPh
+     one 17 - bearlake-client (99895)' (0.000 seconds)
+     … +52 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -E…)
+  ⎿  Test case 'ImageUploadPipelineTests/failedPresignStops()' passed on 'C
+     lone 1 of iPhone 17 - bearlake-client (618)' (0.000 seconds)
+     Test case 'ImageUploadPipelineTests/failedPutSurfaces()' passed on 'Cl
+     … +18 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -B…)
+  ⎿  Test case 'ImageValidationTests/rejectsOversize()' failed on 'Clone 1
+     of iPhone 17 - bearlake-client (1213)' (0.000 seconds)
+     Test case 'ImageUploadPipelineTests/acceptsLargeOriginalThatShrinks()'
+     … +24 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+     Test case 'ImageUploadPipelineTests/acceptsLargeOriginalThatShrinks()'
+      failed on 'Clone 1 of iPhone 17 - bearlake-client (1749)' (0.000 seco
+     … +9 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -only-testing:bearlak…)
+  ⎿  (No output)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -only-testing:bearlak…)
+  ⎿  ** TEST FAILED **
+     Test case 'ImageUploadPipelineTests/failedPutSurfaces()' passed on 'Cl
+     one 1 of iPhone 17 - bearlake-client (2673)' (0.000 seconds)
+     … +12 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -only-testing:bearlak…)
+  ⎿  (No output)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      rm -rf /private/tmp/claude-501/-Users-zachbagley-bearlake/8e08b45b-c0fc-48
+      ca-8370-d9ada406f2d0/scratchpad/tr.xcres…)
+  ⎿  (No output)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcrun xcresulttool get test-results test-details --test-id
+      "ImageUploadPipelineTests/acceptsLargeOriginalThatShrin…)
+  ⎿  {
+       "devices" : [
+         {
+     … +57 lines (ctrl+o to expand)
+
+⏺ My assertion was wrong, not the code: a flat-color 6000×4000 JPEG compresses
+  to 382 KB. The fixture can't be "large in bytes" — but its pixels are what the
+  downscale acts on. Let me assert what actually matters.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+     Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (4214)' (0.000 seconds)
+     … +5 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ All green. Let me confirm the count and add tests for the behaviours I just
+  changed.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -c…)
+  ⎿  346
+     === makeEditor helper ===
+     95:private func makeEditor(blocks: [Block] = []) async -> (ArticleEdit
+     … +25 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      grep -n "StubUploader\|uploader:" ArticleEditorTests.swift | head -20…)
+  ⎿  511:        let model = ArticleEditorViewModel(articleID: "a1", api: a
+     pi, uploader: uploader)
+     === photo test area ===
+     … +40 lines (ctrl+o to expand)
+⏺ Now tests for each behaviour I changed:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      grep -n "actor EditorAPI" -A 40
+      bearlake-clientTests/ArticleEditorTests.swift | head -50…)
+  ⎿  19:private actor EditorAPI: BearLakeAPI {
+     20-    var article: InfoArticle
+     21-    private(set) var patches: [UpdateArticleRequest] = []
+     … +54 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+     Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (5085)' (0.000 seconds)
+     … +5 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Now the two remaining behaviours — the late-callback guard and cache seeding:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+     Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (5530)' (0.000 seconds)
+     … +7 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep "f…)
+  ⎿  Test case 'EditorUploadProgressTests/lateProgressCallbackIsIgnored()'
+     failed on 'Clone 1 of iPhone 17 - bearlake-client (6569)' (1.000 secon
+     ds)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      rm -rf /private/tmp/claude-501/-Users-zachbagley-bearlake/8e08b45b-c0fc-48
+      ca-8370-d9ada406f2d0/scratchpad/tr2.xcre…)
+  ⎿                            "name" : "some : 1.0",
+                           "name" : "model.uploadProgress : 1.0",
+                           "name" : "_ : nil",
+     … +6 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ The guard was incomplete — I never invalidated the generation on completion,
+  so a late callback still matched. Let me track the active upload explicitly:
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorViewModel.swift)
+  ⎿  Added 4 lines, removed 2 lines
+      44      private let uploader: ImageUploader
+      45      private let cache: ImageCache?
+      46  
+      47 -    /// Identifies the current upload so a late progress callba
+         -ck from a                                                      
+      48 -    /// previous one cannot resurrect `uploadProgress`. See `ad
+         -dPhoto`.                                                       
+      47 +    /// Identifies the upload currently in flight, or nil when 
+         +none. A                                                        
+      48 +    /// progress callback that does not match is stale and igno
+         +red — including                                                
+      49 +    /// one from the upload that just finished. See `addPhoto`.
+      50      private var uploadGeneration = 0
+      51 +    private var activeUpload: Int?                             
+      52  
+      53      init(
+      54          articleID: String,
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorViewModel.swift)
+  ⎿  Added 10 lines, removed 2 lines
+      184          // ordering irrelevant.
+      185          uploadGeneration += 1
+      186          let generation = uploadGeneration
+      187 +        activeUpload = generation                             
+      188          uploadProgress = 0
+      188 -        defer { if generation == uploadGeneration { uploadProg
+          -ress = nil } }                                                
+      189 +        // Clearing `activeUpload` is what makes the guard bel
+          +ow reject the                                                 
+      190 +        // final callback too — it can land after this runs.  
+      191 +        defer {                                               
+      192 +            if activeUpload == generation {                   
+      193 +                activeUpload = nil                            
+      194 +                uploadProgress = nil                          
+      195 +            }                                                 
+      196 +        }                                                     
+      197          do {
+      198              let prepared = try await uploader.upload(data, art
+           icleID: articleID) { [weak self] value in
+      199                  Task { @MainActor [weak self] in
+      192 -                    guard let self, generation == self.uploadG
+          -eneration else { return }                                     
+      200 +                    guard let self, self.activeUpload == gener
+          +ation else { return }                                         
+      201                      self.uploadProgress = value
+      202                  }
+      203              }
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -E…)
+  ⎿  Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (7652)' (0.000 seconds)
+     count:
+     350
+  ⎿  (timeout 10m)
+  ⎿  Found 10 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ 350 tests green, zero warnings. Now let me verify the fixes in the running app
+  — the failure mode the review caught is a UI one.
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      python3 - <<'PY'…)
+  ⎿  Error: Exit code 1
+     second category: Second Category
+     Traceback (most recent call last):
+       File "<stdin>", line 14, in <module>
+       File "<stdin>", line 14, in <listcomp>
+     TypeError: string indices must be integers
+
+⏺ Two categories now exist. Let me check the picker and the validation footer in
+  the running app.
+
+  Called xcodebuild 4 times (ctrl+o to expand)
+
+  Called xcodebuild 4 times (ctrl+o to expand)
+
+⏺ Let me verify the validation footer now takes precedence — clearing the title
+  should surface the problem instead of the draft note.
+
+  Called xcodebuild 2 times (ctrl+o to expand)
+
+⏺ Title "X" is valid, so the draft note correctly still shows. Let me create a
+  real validation problem — an empty heading.
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ Row tap works again. Let me cancel and check the category picker — finding
+  #12's fix is new behaviour worth seeing.
+
+  Called xcodebuild 2 times (ctrl+o to expand)
+
+⏺ The picker now offers both categories (e165 Review Check, e168 Second
+  Category) — before the fix it had exactly one row.
+
+  Read 1 file, called xcodebuild (ctrl+o to expand)
+
+⏺ Both categories, checkmark on the current one. Let me clean up the test data
+  and record this in the plan.
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      python3 - <<'PY'…)
+  ⎿  deleted article: Row tap check
+     deleted category: Review Check
+     deleted category: Second Category
+     remaining: {'categories': []}
+
+⏺ All test data removed. Now recording this in the plan:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      grep -n "Phase 9 status" client-dev-plan.md | head)
+  ⎿  726:#### Phase 9 status — ✅ COMPLETE
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      sed -n '726,760p' client-dev-plan.md; echo "..."; grep -n "^### \|^##
+      \|^#### " client-dev-plan.md | awk -F: '$1>7…)
+  ⎿  #### Phase 9 status — ✅ COMPLETE
+
+     **344 tests green, zero warnings.** The edit control stubbed in Phase
+     … +36 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  plan updated
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      git add -A && git status --short && echo "---" && git diff --cached --stat
+      | tail -3)
+  ⎿  M  bearlake-client/bearlake-client/Features/Information/ArticleEditorV
+     iew.swift
+     M  bearlake-client/bearlake-client/Features/Information/ArticleEditorV
+     … +15 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      git commit -q -F - <<'MSG'…)
+  ⎿  pushed
+     b26dfa9 Phase 9 review: fix twelve editor defects found by /code-revie
+     w
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      gh pr view 29 --json body -q .body | head -40)
+  ⎿  ## Summary
+
+     Phase 9 — article editor and image upload. All eight steps.
+     … +37 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      gh pr view 29 --json body -q .body > /private/tmp/claude-501/-Users-zachba
+      gley-bearlake/8e08b45b-c0fc-48ca-8370-d9ada406f2d0/scrat…)
+  ⎿  ok
+     29
+     PR updated
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      git status --short | head; echo "--- clean tree above (empty = clean)
+      ---"…)
+  ⎿  --- clean tree above (empty = clean) ---
+     OPEN  Phase 9: article editor and image upload  https://github.com/sza
+     chbagley/bearlake/pull/29
+
+⏺ The review landed. 13 findings: 1 refuted, 12 real and fixed. PR #29 updated —
+  350 tests green, zero warnings.
+
+  I checked the one it ranked highest before touching it
+
+  The claim was that forcing editMode active makes every block row inert,
+  reducing the editor to reorder/delete only. It reasoned well from the SwiftUI
+  semantics — and it's wrong. Tapping a row opens the focused block editor with
+  the caret in the field. I verified it twice in the simulator.
+
+  I mention it because the review also asserted this "has not been through a
+  phase gate." It had. Had I taken the finding on authority I'd have
+  restructured working code.
+
+  The twelve real ones
+
+  Two could lose data outright:
+
+  - Save was live during an in-flight upload. Tap Save while the PUT runs →
+    editor dismisses → addPhoto appends the block to a ViewModel nobody is
+    showing. Photo gone, S3 object orphaned.
+  - uploadProgress could be stranded by a progress callback landing after
+    cleanup, leaving PhotosPicker dead for the rest of the session.
+
+  The rest were silent-failure paths: save() returning false with no message
+  after a failed load (Save simply does nothing), try? swallowing an iCloud
+  photo failure, and the draft note ordered ahead of the validation message — so
+  Save greys out with no explanation in the ordinary authoring state, since
+  articles are written as drafts.
+
+  The fix I got wrong the first time
+
+  Stamping each upload with a generation looked obviously sufficient. It isn't:
+  the generation still matches when the upload finishes, so the final callback
+  revives uploadProgress. Clearing an activeUpload on completion is what rejects
+  it.
+
+  It passed my own reading and failed the test. That's why the test fires the
+  callback late rather than asserting right after the await — asserting
+  immediately is exactly the racy check the review flagged in my original test.
+
+  I also fixed my own bad assertion: I'd asserted a 6000×4000 fixture would be
+  "large in bytes," but a flat-colour JPEG is 382 KB at any size. Wrong
+  assertion, not wrong code.
+
+  One thing I did not decide for you
+
+  C54: UIPasteboard is UIKit interop outside the sanctioned WKWebView exception.
+  CLAUDE.md says ask. It's one line behind "Copy My Changes" and iOS 17 has no
+  SwiftUI-native pasteboard write — I left it in place and flagged it rather
+  than quietly granting myself an exception.
+
+  Test data and the second category are deleted; tree is clean.
+
+✻ Churned for 51m 26s
+
+※ recap: Phase 9 of the iOS client is done: the code review's 12 real findings are fixed, 350 tests pass, and PR #29 is updated. Next: merge it, then start Phase 10 when you're ready.
+
+❯ Elaborate on the UIPasteboard issue                                           
+
+⏺ Let me get an accurate inventory of the current UIKit surface before arguing
+  about this one line.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== explicit 'import UIKit' ==="…)
+  ⎿  === explicit 'import UIKit' ===
+     Services/ImageCache.swift:7:import UIKit
+     … +5 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== every UIKit symbol used, with location ==="…)
+  ⎿  === every UIKit symbol used, with location ===
+     UIImage  <-  Features/Information/Blocks/CachedAsyncImage.swift:19
+     UIImage  <-  Features/Information/Blocks/CachedAsyncImage.swift:27
+     … +22 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== VideoBlockView 1-12 (are those UIKit refs code or prose?) ===";
+      sed -n '1,12p' Features/…)  ⎿  === VideoBlockView 1-12 (are those UIKit refs code or prose?) ===
+     //
+     //  VideoBlockView.swift
+     … +40 lines (ctrl+o to expand)
+
+⏺ Where it actually stands
+
+  The app's entire UIKit surface is three things:
+
+  ┌────────────────────────┬────────────────────────────────┬──────────────┐
+  │         Symbol         │              File              │    Status    │
+  ├────────────────────────┼────────────────────────────────┼──────────────┤
+  │ WKWebView +            │ VideoBlockView.swift           │ sanctioned   │
+  │ UIViewRepresentable    │                                │ (C37)        │
+  ├────────────────────────┼────────────────────────────────┼──────────────┤
+  │ UIImage                │ ImageCache.swift,              │ granted      │
+  │                        │ CachedAsyncImage.swift         │ later (C53)  │
+  ├────────────────────────┼────────────────────────────────┼──────────────┤
+  │ UIPasteboard           │ ArticleEditorView.swift:97     │ undecided    │
+  └────────────────────────┴────────────────────────────────┴──────────────┘
+
+  Two things make it more than pedantry. First, VideoBlockView.swift's header
+  currently claims "Everything UIKit in the app is confined to this file" — that
+  sentence is now false, and it's the file a future reader consults to learn
+  the rule.
+
+  Second, it compiles with no import UIKit. ArticleEditorView.swift imports only
+  SwiftUI and PhotosUI; SwiftUI re-exports UIKit, so the symbol resolves
+  silently. The rule has no compiler enforcement — which is how I added it in
+  Phase 9 without flagging it, and why the review caught it and I didn't.
+
+  There is no SwiftUI-native alternative on iOS 17
+
+  I checked each candidate:
+
+  - .copyable(_:) (iOS 16+) — drives the system Copy command off focus and
+    selection, via Transferable. It can't be invoked programmatically from a
+    button action.
+  - ShareLink — a share sheet, not a clipboard write. And it's structurally
+    impossible here anyway: SwiftUI's .alert action builder accepts Button and
+    TextField, nothing else.
+  - PasteButton — reads the pasteboard, doesn't write it.
+  - There is no @Environment(\.pasteboard).
+
+  SwiftUI gained no programmatic pasteboard write before our floor. UIPasteboard
+  is the only door.
+
+  The distinction I'd actually draw
+
+  The two existing exceptions are different kinds of thing, and this is a third:
+
+  - UIImage is a data type — a value that crosses a boundary.
+  - WKWebView is a view — it needs a representable wrapper, a coordinator,
+    lifecycle care. That's the interop cost the rule exists to control.
+  - UIPasteboard is a system service: a global singleton whose effect lands
+    outside the app.
+
+  By the rule's usual rationale — interop complexity, preview breakage,
+  maintenance — UIPasteboard is the cheapest of the three. One line, no wrapper,
+  no lifecycle. On that axis it's the easiest yes.
+
+  But there's a better reason to look at it, which neither of us raised
+
+  CLAUDE.md says the content here is genuinely sensitive — "marina codes, 
+  speaker passcodes, key locations" — and must stay out of logs and error
+  reports.
+
+  UIPasteboard.general is, by default:
+
+  - readable by any other app on the device,
+  - synced to the admin's Mac and iPad via Universal Clipboard,
+  - persistent until something overwrites it.
+
+  So "Copy My Changes" on an article documenting the gate code writes that code
+  to the system clipboard and pushes it to their other devices. That's a wider
+  exposure than the logging rule forbids, reached by a different route. It's a
+  more substantive problem than the style violation, and it's fixable without
+  giving up the feature:
+
+  UIPasteboard.general.setItems(
+      [[UTType.utf8PlainText.identifier: json]],
+      options: [
+          .localOnly: true,                                   // no Universal 
+  Clipboard
+          .expirationDate: Date().addingTimeInterval(600),    // gone in 10 
+  minutes
+      ]
+  )
+
+  Still UIPasteboard, so it still needs your exception — but scoped to this
+  device and self-clearing.
+
+  One honest caveat about the feature itself
+
+  Worth saying plainly: the recovery path is weak regardless. An admin taps it
+  and gets a wall of block JSON. Pasting that into Notes and retyping it into
+  the editor is not a real workflow. Its value is as a last-resort escape hatch
+  — it beats silently discarding someone's edits, which is the alternative C39
+  exists to prevent.
+
+  What I'd do
+
+  Grant the exception as C54, with the localOnly + expiring form above, and
+  correct the VideoBlockView.swift header so it stops claiming sole custody of
+  UIKit.
+
+  The alternative — dropping the button — makes the 409 path strictly worse and
+  buys only purity. I don't think that trade is right, but it's your call and
+  I've left the code untouched pending it.
+
+✻ Baked for 1m 39s
+
+※ recap: Phase 9 of the iOS client is done and PR #29 is updated with twelve review fixes; 350 tests pass. The one open item is your decision on whether to allow UIPasteboard in the article editor as sanctioned exception C54.
+
+❯ Go with your recommendations                                                  
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      echo "=== CLAUDE.md UIKit rule ==="; grep -n "UIKit" CLAUDE.md…)
+  ⎿  === CLAUDE.md UIKit rule ===
+     44:- **No UIKit, with exactly one sanctioned exception:** a `WKWebView
+     ` wrapped in `UIViewRepresentable` for the YouTube embed in article vi
+     … +28 lines (ctrl+o to expand)
+
+⏺ Now the three changes. First the pasteboard call:
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorView.swift)
+  ⎿  Added 1 line, removed 1 line
+       94              )) {
+       95                  Button("Copy My Changes") {
+       96                      if let json = model.changesJSONForPasteboa
+           rd() {
+       97 -                        UIPasteboard.general.string = json    
+       97 +                        copyToPasteboard(json)                
+       98                      }
+       99                      Task { await model.reloadAfterConflict() }
+      100                  }
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorView.swift)
+  ⎿  Added 22 lines
+      138          }
+      139      }
+      140  
+      141 +    /// Writes the rescued edits to the pasteboard (C54).     
+      142 +    ///                                                       
+      143 +    /// `UIPasteboard` is UIKit, and the only programmatic cli
+          +pboard write iOS                                              
+      144 +    /// 17 offers — SwiftUI's `.copyable` needs focus and a se
+          +lection,                                                      
+      145 +    /// `ShareLink` is a share sheet and cannot live inside an
+          + `.alert`, and                                                
+      146 +    /// `PasteButton` reads rather than writes.               
+      147 +    ///                                                       
+      148 +    /// Written with `setItems` rather than `.string` because 
+          +an article can                                                
+      149 +    /// document a gate code or where the keys live, and the g
+          +eneral pasteboard                                             
+      150 +    /// is readable by every other app and syncs to the admin'
+          +s Mac and iPad by                                             
+      151 +    /// default. `localOnly` keeps it on this device; the expi
+          +ry clears it                                                  
+      152 +    /// without anyone having to remember to.                 
+      153 +    private func copyToPasteboard(_ json: String) {           
+      154 +        UIPasteboard.general.setItems(                        
+      155 +            [[UTType.utf8PlainText.identifier: json]],        
+      156 +            options: [                                        
+      157 +                .localOnly: true,                             
+      158 +                .expirationDate: Date().addingTimeInterval(600
+          +),                                                            
+      159 +            ]                                                 
+      160 +        )                                                     
+      161 +    }                                                         
+      162 +                                                              
+      163      @ToolbarContentBuilder
+      164      private var toolbar: some ToolbarContent {
+      165          ToolbarItem(placement: .cancellationAction) {
+
+⏺ Update(bearlake-client/Features/Information/ArticleEditorView.swift)
+  ⎿  Added 1 line
+       5  
+       6  import SwiftUI
+       7  import PhotosUI
+       8 +import UniformTypeIdentifiers                                  
+       9  
+      10  /// The article editor (admin only). Secondary authoring surfac
+          e — the web app
+      11  /// is primary — so it is built for iterating on an existing ar
+          ticle rather
+
+⏺ Now the header that no longer tells the truth:
+
+⏺ Update(bearlake-client/Features/Information/Blocks/VideoBlockView.swift)
+  ⎿  Added 11 lines, removed 3 lines
+       2  //  VideoBlockView.swift
+       3  //  bearlake-client
+       4  //
+       5 -//  THE ONE SANCTIONED UIKit INTEROP IN THIS APP (C37).        
+       5 +//  THE ONLY UIKit *VIEW* INTEROP IN THIS APP (C37).           
+       6  //
+       7  //  iOS 17 has no SwiftUI-native web view — SwiftUI's `WebView`
+           arrived in
+       8  //  iOS 26, above our deployment floor — and YouTube cannot be 
+          played through
+       9 -//  AVPlayer. Everything UIKit in the app is confined to this f
+         -ile; anything                                                  
+      10 -//  else needs discussion first.                               
+       9 +//  AVPlayer. This is the only `UIViewRepresentable` in the app
+         +, and the only                                                 
+      10 +//  place UIKit renders anything.                              
+      11  //
+      12 +//  Two narrower exceptions live elsewhere, neither of them a v
+         +iew:                                                           
+      13 +//    - `UIImage` as a data type, in `ImageCache` and `Image(ui
+         +Image:)` (C53)                                                 
+      14 +//    - `UIPasteboard` for one clipboard write in `ArticleEdito
+         +rView` (C54)                                                   
+      15 +//                                                             
+      16 +//  Anything beyond those three needs discussion first. Note th
+         +at none of them                                                
+      17 +//  require `import UIKit` — SwiftUI re-exports it, so the comp
+         +iler will not                                                  
+      18 +//  stop a fourth from appearing.                              
+      19 +//                                                             
+      20  
+      21  import SwiftUI
+      22  import WebKit
+
+⏺ Now CLAUDE.md, whose rule still says "exactly one":
+
+⏺ Update(~/bearlake/CLAUDE.md)
+  ⎿  Added 6 lines, removed 1 line
+      41  ### iOS client
+      42  - **Minimum deployment: iOS 17.** Use `@Observable`, SwiftData,
+           and `NavigationStack`. Do not generate Combine-heavy code, `Ob
+          servableObject`/`@Published`, or `NavigationView`. The Xcode te
+          mplate shipped `IPHONEOS_DEPLOYMENT_TARGET = 26.0`; it is corre
+          cted to 17.0 in client plan Phase 0. Anything above 17 excludes
+           family members on older phones.
+      43  - Swift, SwiftUI only. No XIBs, no storyboard files. **Swift 5 
+          language mode** (not Swift 6 strict concurrency) — enforce isol
+          ation by hand with `@MainActor` on ViewModels and `actor` for s
+          hared mutable state.
+      44 -- **No UIKit, with exactly one sanctioned exception:** a `WKWeb
+         -View` wrapped in `UIViewRepresentable` for the YouTube embed in
+         - article video blocks. iOS 17 has no SwiftUI-native web view an
+         -d YouTube cannot play through `AVPlayer`. Confine it to that on
+         -e file; any other UIKit interop needs discussion first.        
+      44 +- **No UIKit, with three sanctioned exceptions** — each granted
+         + because iOS 17 offers no SwiftUI-native equivalent, and each r
+         +ecorded as a decision in `client-dev-plan.md`:                 
+      45 +  - **`WKWebView`** in `UIViewRepresentable`, for the YouTube e
+         +mbed in article video blocks (C37). The only UIKit that renders
+         + anything; confined to `VideoBlockView.swift`. SwiftUI's `WebVi
+         +ew` arrived in iOS 26, above our floor.                        
+      46 +  - **`UIImage`** as a data type, in `ImageCache` and `Image(ui
+         +Image:)` (C53). There is no way to build a SwiftUI `Image` from
+         + bytes without it.                                             
+      47 +  - **`UIPasteboard`** for the single clipboard write behind "C
+         +opy My Changes" (C54). `.copyable` needs focus and a selection,
+         + `ShareLink` is a share sheet and cannot live in an `.alert`, a
+         +nd `PasteButton` only reads. Write with `setItems(_:options:)` 
+         +using `.localOnly` and an expiry — never `.string` — because ar
+         +ticle bodies carry gate codes and key locations, and the genera
+         +l pasteboard is readable by other apps and syncs to the user's 
+         +other devices.                                                 
+      48 +                                                               
+      49 +  Anything beyond these three needs discussion first. **The com
+         +piler will not enforce this:** SwiftUI re-exports UIKit, so `UI
+         +Pasteboard` and friends resolve with no `import UIKit` anywhere
+         + in the file. Adding a fourth exception is a code-review catch,
+         + not a build error.                                            
+      50  - **Testing: Swift Testing** (`import Testing`, `@Test`, `#expe
+          ct`). No XCUITest bundle — UI verification is a scripted simula
+          tor run at each phase gate.
+      51  - **Architecture: MVVM.** Views are SwiftUI structs; ViewModels
+           are `@Observable` classes.
+      52  - **Persistence: SwiftData** — used as a local cache of server 
+          state, not as the source of truth. The API is authoritative.
+  ⎿  Found 20 new diagnostic issues in 2 files (ctrl+o to expand)
+
+⏺ Now the C54 decision entry in the plan:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  plan updated
+     107:| C54 | `UIPasteboard` for "Copy My Changes" | **Allowed**, in `Ar
+     ticleEditorView` only, and written with `setItems(_:options:)` using `
+     … +10 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -E…)
+  ⎿  Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (42317)' (0.000 seconds)
+     count:
+     350
+  ⎿  (timeout 10m)
+
+⏺ 350 green. This changed runtime behaviour, so let me verify it end to end —
+  including that the copied payload really carries the title, which was finding
+  #10.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-server
+      npm run dev > /Users/zachbagley/.claude/jobs/ef790223/tmp/s15.log 2>&1 &…)
+  ⎿  article id: b6f60f0b-ee1c-4785-8478-d4be48c89e22
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ Bash(xcrun simctl pbcopy 9977EBF7-C60B-457D-B96D-F92942FBFDDF <<<
+      "SENTINEL-BEFORE-COPY"
+      echo "pasteboard primed:"; xcrun simctl pbpaste
+      9977EBF7-C60B-457D-B96D-F929…)
+  ⎿  pasteboard primed:
+     SENTINEL-BEFORE-COPY
+
+⏺ Pasteboard primed with a sentinel, so a "pass" can't be a false positive. Now
+  into the editor.
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ Session survived. Navigating to the article:
+
+  Called xcodebuild 4 times (ctrl+o to expand)
+⏺ Editor open. Now I'll retitle in the app — that's the edit finding #10 said
+  was being silently dropped:
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ Now the other admin saves first — this is what makes the app's token stale:
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      python3 - <<'PY'…)
+  ⎿  other admin saved. new updatedAt: 2026-08-26T17:16:24.995Z | title: Sa
+     ved by the other admin
+
+⏺ The app's token is now stale. Tapping Save should produce a 409, not an
+  overwrite:
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ The 409 alert fired — "Someone else saved this article while you were 
+  editing." Now the button under test:
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ Editor reloaded to the server's version — no overwrite. Now the payload that
+  was rescued:
+
+⏺ Bash(echo "=== simulator pasteboard ==="
+      xcrun simctl pbpaste 9977EBF7-C60B-457D-B96D-F92942FBFDDF | tee
+      /private/tmp/claude-501/-Users-zachbagley-bearlake/8e08b45b-…)
+  ⎿  === simulator pasteboard ===
+     {
+       "blocks" : [
+     … +19 lines (ctrl+o to expand)
+
+⏺ Everything holds. The sentinel was replaced (so setItems with localOnly really
+  writes), and the payload carries RESCUE-ME-TITLE — the local edit that the
+  old blocks-only copy would have discarded. Cleaning up:
+
+⏺ Bash(xcrun simctl pbcopy 9977EBF7-C60B-457D-B96D-F92942FBFDDF <<< ""
+      cd /Users/zachbagley…)
+  ⎿  deleted article: Saved by the other admin
+     deleted category: Conflict Check
+     remaining: {'categories': []}
+     pasteboard cleared, server stopped
+  ⎿  Shell cwd was reset to /Users/zachbagley/bearlake
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      git add -A && git status --short…)
+  ⎿  M  CLAUDE.md
+     M  bearlake-client/bearlake-client/Features/Information/ArticleEditorV
+     iew.swift
+     … +7 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      gh pr view 29 --json body -q .body > /private/tmp/claude-501/-Users-zachba
+      gley-bearlake/8e08b45b-c0fc-48ca-8370-d9ada406f2d0/scrat…)
+  ⎿  ok
+     PR #29 updated
+     --- (empty above = clean tree) ---
+
+⏺ Done — 10d9218 on PR #29. 350 tests green, zero warnings, clean tree.
+
+  What changed
+
+  The pasteboard write is now device-local and self-clearing:
+
+  UIPasteboard.general.setItems(
+      [[UTType.utf8PlainText.identifier: json]],
+      options: [.localOnly: true, .expirationDate:
+  Date().addingTimeInterval(600)]
+  )
+
+  VideoBlockView.swift's header stopped lying. It claimed "everything UIKit is 
+  confined to this file" — untrue since C53. It now lists all three exceptions
+  and, more usefully, warns that the compiler can't enforce any of them: SwiftUI
+  re-exports UIKit, so a fourth would compile with no import UIKit anywhere.
+  CLAUDE.md's "exactly one sanctioned exception" is corrected to the same list.
+
+  I tested it against a real conflict rather than a mock
+
+  Worth doing, because two of the three things being verified only exist when a
+  genuine 409 comes back:
+
+  ┌──────────────────────────────────────────┬──────────────────────────────┐
+  │                   Step                   │            Result            │
+  ├──────────────────────────────────────────┼──────────────────────────────┤
+  │ App retitles to RESCUE-ME-TITLE; other   │ app's updatedAt goes stale   │
+  │ admin PATCHes first                      │                              │
+  ├──────────────────────────────────────────┼──────────────────────────────┤
+  │ Save                                     │ 409 → conflict alert, no     │
+  │                                          │ overwrite                    │
+  ├──────────────────────────────────────────┼──────────────────────────────┤
+  │ Copy My Changes                          │ sentinel on the pasteboard   │
+  │                                          │ replaced                     │
+  ├──────────────────────────────────────────┼──────────────────────────────┤
+  │ Payload                                  │ carried RESCUE-ME-TITLE      │
+  ├──────────────────────────────────────────┼──────────────────────────────┤
+  │ After                                    │ editor reloaded to the       │
+  │                                          │ server's version             │
+  └──────────────────────────────────────────┴──────────────────────────────┘
+
+  I primed the pasteboard with a sentinel first so a pass couldn't be a false
+  positive — an empty clipboard would have looked identical to a silent failure.
+
+  That last row is the one that matters: the copied JSON contained the local 
+  title, which is precisely the edit the old blocks-only version discarded while
+  promising to preserve it. Finding #10 was real, and this is it failing to
+  happen.
+
+  Test article, category, and the clipboard contents are all cleared; local
+  server stopped.
+
+  One thing I'd flag rather than leave implied: the escape hatch is still a wall
+  of block JSON, and no admin is realistically going to reconstruct an article
+  from it. It beats silent data loss, which is all it's for. If a better
+  conflict affordance ever gets built, this button is the first thing it should
+  replace — that's recorded in the plan rather than left as folklore.
+
+✻ Cogitated for 5m 50s
+
+※ recap: Phase 9 of the iOS client is done and PR #29 is updated: all twelve real code-review findings fixed, the UIPasteboard exception granted and scoped, 350 tests green. Next: merge PR #29, then start Phase 10.
+
+❯ PR merged. Switch back to master and Execute Phase 10 of client-dev-plan.md   
+  on a new branch, one step at a time. At the end of each step, review, test    
+  (if applicable), evaluate, and report on your work; at the end of the phase,  
+  open a PR, then stop and report on your work for the whole phase. No need to  
+  stop between steps unless you need my help.                                   
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      git checkout -q master && git pull -q --ff-only && git log --oneline -3…)
+  ⎿  f3479a8 Merge pull request #29 from szachbagley/client-phase-9
+     10d9218 C54: grant the UIPasteboard exception, scoped to this device
+     b26dfa9 Phase 9 review: fix twelve editor defects found by /code-revie
+     … +2 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      sed -n '/^### Phase 10 — SwiftData offline cache/,/^### Phase 11/p'
+      client-dev-plan.md)
+  ⎿  ### Phase 10 — SwiftData offline cache
+
+     Deferred to here deliberately: caching is only meaningful once there i
+     … +17 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      echo "=== C45 / C46 ==="…)
+  ⎿  === C45 / C46 ===
+     98:| C45 | SwiftData scope | Caches **read models only** for offline *
+     viewing*: announcements, events, quick tips, categories, article summa
+     … +27 lines (ctrl+o to expand)
+
+⏺ Let me survey what I'm caching before writing any models.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== Models tree ==="; find Models -name "*.swift" | sort…)
+  ⎿  === Models tree ===
+     Models/Block.swift
+     Models/DTOs/Announcement.swift
+     … +37 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      for f in Announcement QuickTip Information Article Event; do…)
+  ⎿  === Announcement.swift ===
+     import Foundation
+     struct Announcement: Codable, Sendable, Identifiable, Equatable {
+     … +168 lines (ctrl+o to expand)
+
+⏺ Six read models to cache. Let me look at the load pattern I'll be wrapping.
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== InformationViewModel ==="; grep -vE "^\s*//"
+      Features/Information/InformationViewModel.s…)
+  ⎿  === InformationViewModel ===
+     import Foundation
+     import Observation
+     … +53 lines (ctrl+o to expand)
+
+⏺ Now Step 1 — the @Model types.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      grep -vE "^\s*//" Models/DTOs/APICoding.swift | grep -vE "^\s*$"…)
+  ⎿  import Foundation
+     enum APICoding {
+         private static let withFractional: ISO8601DateFormatter = {
+     … +51 lines (ctrl+o to expand)
+
+⏺ Write(bearlake-client/Models/Cache/CachedModels.swift)
+  ⎿  Wrote 289 lines to bearlake-client/Models/Cache/CachedModels.swift
+       1 //
+       3 //  bearlake-client
+       4 //
+         PI is the
+       6 //  source of truth, and nothing here is ever written back to th
+       7 //
+       8 //  Each type carries the server `id` as its unique attribute so
+       9 //  fetch upserts rather than duplicating, and each converts to 
+         and from the
+          keep working
+     … +304 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      xcodebuild build -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -E "error:|warnin…)
+  ⎿  xcodebuild: error: The directory /Users/zachbagley/bearlake does not c
+     ontain an Xcode project, workspace or package.
+     ---build done---
+  ⎿  Found 10 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild build -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -…)
+  ⎿  ---build done---
+  ⎿  (timeout 10m)
+
+⏺ Step 1 builds and auto-added to the target. Let me test the two things most
+  likely to break — the blocks blob and the all-day strings.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      ls…)
+  ⎿  AnnouncementsViewModelTests.swift
+     APIClientTests.swift
+     ArticleEditorTests.swift
+     … +27 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      sed -n '278,390p' FakeAPI.swift)
+  ⎿      static func fixture(
+             id: String = "00000000-0000-4000-8000-0000000000u1",
+             displayName: String = "Zach",
+     … +103 lines (ctrl+o to expand)
+
+⏺ Write(bearlake-clientTests/CacheModelTests.swift)
+  ⎿  Wrote 138 lines to bearlake-clientTests/CacheModelTests.swift
+       1 //
+       2 //  CacheModelTests.swift
+       3 //  bearlake-clientTests
+       4 //
+       5 //  Phase 10, step 1. The DTO ↔ `@Model` conversions.
+       6 //
+       7 
+       8 import Foundation
+       9 import Testing
+      10 @testable import bearlake_client
+     … +164 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -E…)
+  ⎿  Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (56530)' (0.000 seconds)
+     count:
+     358
+  ⎿  (timeout 10m)
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Step 1 complete — 358 tests (+8). Blocks round-trip including the unknown
+  block, all-day dates stay String, and the presigned URL is dropped on the way
+  in.
+
+  Step 2 is the CacheStore. Let me check how events are read back, since a range
+  query is where this could go subtly wrong.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== CalendarViewModel load/fetch ==="; grep -n "func load\|func
+      fetch\|listEvents\|window\|e…)
+  ⎿  === CalendarViewModel load/fetch ===
+     22:    /// The window currently held, so navigation does not refetch a
+      month it
+     … +35 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== CabinDate API surface ==="; grep -nE "^\s{4}(static )?(func|var)
+      |^\s{4}/// " Utilities/…)
+  ⎿  === CabinDate API surface ===
+     34:    var timeZone: TimeZone { calendar.timeZone }
+     44:    func components(fromDateOnly value: String) -> DateComponents?
+     … +30 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== EventDates ==="; grep -vE "^\s*//" Models/EventDates.swift |
+      grep -vE "^\s*$" | head -50)
+  ⎿  === EventDates ===
+     import Foundation
+     enum EventDates: Equatable, Sendable {
+     … +48 lines (ctrl+o to expand)
+
+⏺ Enough survey. Writing the store — reusing CabinDate's tested primitives
+  rather than inventing string comparisons.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '1,45p' Utilities/CabinDate.swift | grep -vE "^\s*$"…)
+  ⎿  //
+     //  CabinDate.swift
+     //  bearlake-client
+     … +61 lines (ctrl+o to expand)
+
+⏺ Write(bearlake-client/Models/Cache/CacheStore.swift)
+  ⎿  Wrote 279 lines to bearlake-client/Models/Cache/CacheStore.swift
+       1 //
+       2 //  CacheStore.swift
+       3 //  bearlake-client
+       5 //  Phase 10, step 2. The single door to the SwiftData store.
+       6 //
+       7 //  Everything above this layer speaks DTOs; the `@Model` classe
+         s never leave
+         ather than a
+       9 //  second model layer the ViewModels have to know about.
+      10 //
+     … +315 lines (ctrl+o to expand)
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild build -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -…)
+  ⎿  ---build done---
+  ⎿  (timeout 10m)
+  ⎿  Found 10 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Builds clean. Now tests for the store — the upsert, the event prune, and
+  sign-out:
+
+⏺ Write(bearlake-clientTests/CacheStoreTests.swift)
+  ⎿  Wrote 228 lines to bearlake-clientTests/CacheStoreTests.swift
+       1 //
+       2 //  CacheStoreTests.swift
+       3 //  bearlake-clientTests
+       5 //  Phase 10, step 2. Every test runs against a fresh in-memory 
+         container, so
+       6 //  they never touch the simulator's real store and cannot leak 
+         into each
+       8 //
+       9 
+      10 import Foundation
+     … +257 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -E…)
+  ⎿  Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (57984)' (0.000 seconds)
+     count:
+     371
+  ⎿  (timeout 10m)
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ 371 tests (+13). Let me spot-check that the prune test actually fails if I
+  break the prune — the checklist asks for this and it's the subtlest logic
+  here.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      cp Models/Cache/CacheStore.swift
+      /private/tmp/claude-501/-Users-zachbagley-bearlake/8e08b45b-c0fc-…)
+  ⎿  prune disabled
+     ** TEST FAILED **
+     Test case 'CacheStoreEventTests/deletedEventIsPruned()' failed on 'Clo
+     … +6 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Three prune tests fail when I disable the prune; the two that shouldn't care
+  still pass. Step 2 complete — the tests have teeth.
+
+  Step 3 wires six ViewModels. Let me read them first.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== HomeViewModel ==="; grep -vE "^\s*//"
+      Features/Home/HomeViewModel.swift | grep -vE "^\s*…)
+  ⎿  === HomeViewModel ===
+     import Foundation
+     import Observation
+     … +58 lines (ctrl+o to expand)
+
+⏺ Step 3. First the one decision C46 actually makes, in one place:
+
+⏺ Write(bearlake-client/Models/Cache/CacheFallback.swift)
+  ⎿  Wrote 53 lines to bearlake-client/Models/Cache/CacheFallback.swift
+       1 //
+       2 //  CacheFallback.swift
+       3 //  bearlake-client
+       5 //  Phase 10, step 3. The C46 decision, written once.
+       6 //
+       7 //  When a fetch fails there are exactly two outcomes, and which
+          one applies
+       9 //
+      10 //    - something cached  → render it read-only behind an offlin
+         e banner
+     … +54 lines (ctrl+o to expand)
+
+⏺ Now wiring the ViewModels. Starting with the two Home surfaces:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  HomeViewModel patched
+     92:    private func loadUpcoming() async throws -> [CalendarEvent] {
+                 byAdding: .day, value: Limits.eventRangeMaxWindowDays - 1,
+     … +24 lines (ctrl+o to expand)
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ The next-three selection is inside the fetch. Both paths need it, so let me
+  extract it rather than duplicate:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  ok
+     ---build---
+  ⎿  (timeout 10m)
+
+⏺ Now the other five ViewModels:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      for f in Features/Home/AnnouncementsViewModel.swift
+      Features/Information/InformationViewModel.swif…)
+  ⎿  ########## Features/Home/AnnouncementsViewModel.swift
+     import Foundation
+     import Observation
+     … +194 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  AnnouncementsViewModel patched
+     InformationViewModel patched
+     CategoryViewModel patched
+     ArticleViewModel patched
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== CalendarViewModel load ==="; sed -n '100,165p'
+      Features/Calendar/CalendarViewModel.swift…)
+  ⎿  === CalendarViewModel load ===
+         func stepSelectedDay(by delta: Int) {
+             guard let moved = dates.dateOnly(selectedDay, addingDays: delt
+     … +78 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  CalendarViewModel patched
+     props added
+     ---build---
+  ⎿  (timeout 10m)
+
+⏺ All six ViewModels wired and building. Now the views need the banner and
+  disabled controls:
+⏺ Write(bearlake-client/Features/Shared/OfflineBanner.swift)
+  ⎿  Wrote 58 lines to bearlake-client/Features/Shared/OfflineBanner.swift
+       1 //
+       2 //  OfflineBanner.swift
+       3 //  bearlake-client
+       4 //
+       5 //  Phase 10, step 3. The C46 banner.
+       7 
+       8 import SwiftUI
+       9 
+      10 /// Says the screen is showing a saved copy, in the one place ev
+         ery screen
+     … +55 lines (ctrl+o to expand)
+
+⏺ That extension is too clever — emitting a sibling Section from a View
+  extension only works inside a List and reads badly. Simpler:
+
+⏺ Update(bearlake-client/Features/Shared/OfflineBanner.swift)
+  ⎿  Removed 17 lines
+      31      }
+      32  }
+      33  
+      34 -extension View {                                               
+      35 -    /// Adds the banner as a `List` section when offline.      
+      36 -    ///                                                        
+      37 -    /// Takes the flag rather than being wrapped in an `if` at 
+         -each call site,                                                
+      38 -    /// so a screen cannot accidentally show the banner and lea
+         -ve its                                                         
+      39 -    /// mutating controls enabled.                             
+      40 -    @ViewBuilder                                               
+      41 -    func offlineBanner(_ isOffline: Bool) -> some View {       
+      42 -        if isOffline {                                         
+      43 -            Section { OfflineBanner() }                        
+      44 -            self                                               
+      45 -        } else {                                               
+      46 -            self                                               
+      47 -        }                                                      
+      48 -    }                                                          
+      49 -}                                                              
+      50 -                                                               
+      34  #Preview {
+      35      List {
+      36          Section { OfflineBanner() }
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== mutating controls per view (add/edit/delete/swipe) ==="…)
+  ⎿  === mutating controls per view (add/edit/delete/swipe) ===
+     Features/Home/HomeView.swift:81:                if auth.isAdmin {
+     Features/Home/HomeView.swift:85:                        Label("New Ann
+     … +35 lines (ctrl+o to expand)
+
+⏺ The pattern is uniform: if auth.isAdmin. Let me look at each site precisely
+  before editing.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "### HomeView 70-95"; sed -n '70,95p' Features/Home/HomeView.swift…)
+  ⎿  ### HomeView 70-95
+                             text: announcement.body
+                         )
+     … +66 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== existing .refreshable ==="; grep -rn "refreshable" Features/ |
+      sed 's|^Features/||'…)
+  ⎿  === existing .refreshable ===
+     Home/AllAnnouncementsView.swift:76:        .refreshable { await model.
+     load() }
+     … +59 lines (ctrl+o to expand)
+
+⏺ Step 5's .refreshable is already on all six screens from earlier phases. Now
+  the banner and control gating:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      for f in Features/Home/HomeView.swift
+      Features/Home/AllAnnouncementsView.swift Features/Informatio…)
+  ⎿  ######## Features/Home/HomeView.swift
+     10:struct HomeView: View {
+     11:    let auth: AuthViewModel
+     … +42 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  patched Features/Home/HomeView.swift
+     patched Features/Home/AllAnnouncementsView.swift
+     patched Features/Information/InformationView.swift
+     … +2 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== InformationView remaining isAdmin control sites ==="; grep -n
+      "if auth.isAdmin" Features…)
+  ⎿  === InformationView remaining isAdmin control sites ===
+     145:                            if auth.isAdmin {
+     165:                if auth.isAdmin {
+     … +50 lines (ctrl+o to expand)
+
+⏺ All four in InformationView are control sites:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  InformationView: replaced 4 control guards
+     === CalendarMonthView: creation / edit entry points ===
+     55:                    onCreate: model.requestCreate(on:),
+     … +8 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== CalendarMonthView 30-70 ==="; sed -n '30,70p'
+      Features/Calendar/CalendarMonthView.swift…)
+  ⎿  === CalendarMonthView 30-70 ===
+         var body: some View {
+             // One scroll view for the whole screen.
+     … +87 lines (ctrl+o to expand)
+
+⏺ The calendar differs — members create events too, so offline gating there
+  isn't about admin. Let me see how open/create decisions are made:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      grep -n "DayAction\|func requestCreate\|func requestOpen\|case
+      create\|case edit\|case view\|canEd…)
+  ⎿  239:    enum DayAction: Equatable, Identifiable {
+     252:        case create(dateOnly: String)
+     254:        case edit(CalendarEvent)
+     … +18 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  CalendarViewModel gated
+     CalendarMonthView banner added
+     DayDetailView gated
+     … +3 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '130,170p' Features/Calendar/DayDetailView.swift)
+  ⎿      let label: String
+         let events: [CalendarEvent]
+         let onCreate: @MainActor () -> Void
+     … +38 lines (ctrl+o to expand)
+
+⏺ That's a nested HourRow with no model — and the view-level guard is redundant
+  anyway, since requestCreate already refuses offline. Reverting to the single
+  ViewModel guard:
+
+⏺ Update(bearlake-client/Features/Calendar/DayDetailView.swift)  ⎿  Added 4 lines, removed 5 lines
+      152              VStack(alignment: .leading, spacing: 2) {
+      153                  if events.isEmpty {
+      154                      // Tapping empty space creates an event on
+            this day
+      155 -                    // (storyboard).                          
+      155 +                    // (storyboard). Offline this is a no-op: 
+          +the ViewModel's                                               
+      156 +                    // `requestCreate` refuses, which keeps th
+          +e decision in                                                 
+      157 +                    // one place rather than repeating it per 
+          +gesture.                                                      
+      158                      Color.clear
+      159                          .frame(height: 28)
+      160                          .contentShape(Rectangle())
+      159 -                        .onTapGesture {                       
+      160 -                            guard model.isOffline == false els
+          -e { return }                                                  
+      161 -                            onCreate()                        
+      162 -                        }                                     
+      161 +                        .onTapGesture(perform: onCreate)      
+      162                  } else {
+      163                      ForEach(events) { event in
+      164                          Button {
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild build -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -…)
+  ⎿  ---build---
+  ⎿  (timeout 10m)
+  ⎿  Found 10 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Builds clean. Now wiring the container into the app so this is actually live,
+  plus step 4's sign-out clear:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== RootTabView: how views are constructed ==="; grep -rn
+      "HomeView(\|CalendarMonthView(\|In…)
+  ⎿  === RootTabView: how views are constructed ===
+     App/RootTabView.swift:28:                CalendarMonthView(auth: auth,
+      api: api)
+     … +32 lines (ctrl+o to expand)
+
+⏺ Now the container and step 4's sign-out clear. Let me check the view inits I
+  need to thread through:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      for f in Features/Home/HomeView.swift
+      Features/Home/AllAnnouncementsView.swift Features/Informatio…)
+  ⎿  ### Features/Home/HomeView.swift
+         init(auth: AuthViewModel, api: BearLakeAPI) {
+             self.auth = auth
+     … +47 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  patched Features/Home/HomeView.swift
+     patched Features/Home/AllAnnouncementsView.swift
+     patched Features/Information/InformationView.swift
+     … +3 lines (ctrl+o to expand)
+
+⏺ Now the composition root, RootTabView, and step 4's sign-out clear:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '20,50p' App/RootTabView.swift)
+  ⎿      }
+
+         @State private var selection: Tab = .home
+     … +28 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  RootTabView patched
+     AuthViewModel patched
+     43:    private let api: BearLakeAPI
+     … +2 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '43,55p' Features/Auth/AuthViewModel.swift)
+  ⎿      private let api: BearLakeAPI
+         private let tokens: TokenStore
+     … +9 lines (ctrl+o to expand)
+
+⏺ Update(bearlake-client/Features/Auth/AuthViewModel.swift)
+  ⎿  Added 14 lines, removed 1 line
+      43      private let api: BearLakeAPI
+      44      private let tokens: TokenStore
+      45  
+      46 -    init(api: BearLakeAPI, tokens: TokenStore) {               
+      46 +    /// Runs whenever a session ends, for either reason.       
+      47 +    ///                                                        
+      48 +    /// A closure rather than a `CacheStore`, so auth stays una
+         +ware of the                                                    
+      49 +    /// cache — and typed `@MainActor` deliberately: storing an
+         + isolated                                                      
+      50 +    /// closure in a plain function-type property erases its is
+         +olation, which                                                 
+      51 +    /// in Swift 5 mode is a data race the compiler will not wa
+         +rn about.                                                      
+      52 +    private let onSignedOut: @MainActor () -> Void             
+      53 +                                                               
+      54 +    init(                                                      
+      55 +        api: BearLakeAPI,                                      
+      56 +        tokens: TokenStore,                                    
+      57 +        onSignedOut: @escaping @MainActor () -> Void = {}      
+      58 +    ) {                                                        
+      59          self.api = api
+      60          self.tokens = tokens
+      61 +        self.onSignedOut = onSignedOut                         
+      62      }
+      63  
+      64      var currentUser: PublicUser? { state.user }
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  BearLakeApp patched
+     ---build---
+  ⎿  (timeout 10m)
+  ⎿  Found 10 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ The whole chain builds. Now tests for step 3's offline behaviour:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      grep -n "final class FakeAPI\|func setFailure\|nextError\|var
+      failure\|throwOn" FakeAPI.swift…)
+  ⎿  28:    var nextError: APIError?
+     47:    func setNextError(_ error: APIError?) { nextError = error }
+     56:        if let error = nextError {
+     … +26 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      sed -n '50,75p' FakeAPI.swift…)
+  ⎿          articleSummaries[categoryID] = summaries
+         }
+         func callCount(_ name: String) -> Int { callCounts[name] ?? 0 }
+     … +28 lines (ctrl+o to expand)
+
+⏺ nextError is one-shot, but Home makes two calls. Let me add a persistent
+  failure mode:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  FakeAPI patched
+     64:        return APIError(status: 0, code: KnownErrorCode.network.raw
+     Value, message: message)
+     74:        APIError(
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '55,85p' Services/APIError.swift)
+  ⎿          let message: String
+             switch underlying.code {
+             case .timedOut:
+     … +27 lines (ctrl+o to expand)
+
+⏺ Write(bearlake-clientTests/OfflineFallbackTests.swift)
+  ⎿  Wrote 304 lines to bearlake-clientTests/OfflineFallbackTests.swift
+       1 //
+       2 //  OfflineFallbackTests.swift
+       3 //  bearlake-clientTests
+       5 //  Phase 10, step 3. The C46 contract, per read ViewModel:
+       6 //
+       7 //    - a successful fetch populates the cache
+       8 //    - a failed fetch with a populated cache renders the cache 
+       9 //      offline flag, with no error alert on top of the banner
+      10 //    - a failed fetch with an empty cache raises the error, nev
+         er an empty
+     … +336 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      grep -n "func seedArticles\|func seedArticle\b\|func seedArticle("
+      FakeAPI.swift | head)
+  ⎿  (No output)  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      sed -n '38,56p' FakeAPI.swift)
+  ⎿          events: [CalendarEvent]? = nil,
+             announcements: [Announcement]? = nil,
+             quickTips: [QuickTip]? = nil,
+     … +18 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+     ** TEST FAILED **
+     Test case 'CalendarOfflineTests/offlineDoesNotMarkWindowLoaded()' fail
+     … +12 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      rm -rf /private/tmp/claude-501/-Users-zachbagley-bearlake/8e08b45b-c0fc-48
+      ca-8370-d9ada406f2d0/scratchpad/t3.xcres…)
+  ⎿  ### successPopulatesCache
+                   "name" : "Expectation failed: (store.announcements().map
+     (\\.id) → []) == [\"a1\"]",
+     … +6 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '/func load() async {/,/^    }$/p'
+      Features/Home/HomeViewModel.swift | head -50…)
+  ⎿      func load() async {
+             guard isLoading == false else { return }
+             isLoading = true
+     … +40 lines (ctrl+o to expand)
+
+⏺ My first patch silently no-opped — I used replace without an assert there, and
+  the real file had a comment block I hadn't matched. That's the lesson from
+  the cleanup-script incident; let me fix both and assert this time.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== InformationViewModel load ==="; sed -n '/func load() async {/,/^
+         }$/p' Features/Infor…)
+  ⎿  === InformationViewModel load ===
+         func load() async {
+             guard isLoading == false else { return }
+     … +28 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  patched Features/Home/HomeViewModel.swift
+     patched Features/Information/InformationViewModel.swift
+     === confirm the other four actually applied ===
+     … +6 lines (ctrl+o to expand)
+
+⏺ All six confirmed wired. Re-running:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -E…)
+  ⎿  ** TEST FAILED **
+     Test case 'CalendarOfflineTests/offlineDoesNotMarkWindowLoaded()' fail
+     ed on 'Clone 1 of iPhone 17 - bearlake-client (62505)' (0.000 seconds)
+     … +4 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      rm -rf /private/tmp/claude-501/-Users-zachbagley-bearlake/8e08b45b-c0fc-48
+      ca-8370-d9ada406f2d0/scratchpad/t4.xcres…)
+  ⎿                "name" : "Expectation failed: await api.callCount(\"list
+     Events\") > callsBefore: it retried",
+                   "name" : "Expectation failed: (model.isOffline → true) =
+     = false",
+  ⎿  (timeout 10m)
+
+⏺ The test premise was wrong, not the code: it loaded successfully first, so
+  that window was legitimately fetched. The real concern is launching offline
+  and recovering — let me test that instead.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+     Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (64044)' (0.000 seconds)
+     … +2 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ 385 tests green, zero warnings. Steps 3, 4, and 5 are complete — let me verify
+  step 4's clear is actually wired and confirm step 5 needs nothing:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== step 4: sign-out wiring ==="; grep -n
+      "onSignedOut\|cache?.clear" App/BearLakeApp.swift…)
+  ⎿  === step 4: sign-out wiring ===
+     App/BearLakeApp.swift:60:            cache?.clear()
+     Features/Auth/AuthViewModel.swift:52:    private let onSignedOut: @Mai
+     … +18 lines (ctrl+o to expand)
+
+⏺ Two screens are missing the banner. Let me add them:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== AllAnnouncementsView list head ==="; sed -n '/    var body: some
+      View {/,/+8p/p' Feature…)
+  ⎿  === AllAnnouncementsView list head ===
+         var body: some View {
+             List {
+     … +23 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  banner added to Features/Home/AllAnnouncementsView.swift
+     banner added to Features/Information/CategoryView.swift
+     ---build---
+     … +10 lines (ctrl+o to expand)
+
+⏺ All six screens carry the banner. Now a test that sign-out actually clears —
+  step 4's whole point:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+     Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (64992)' (0.000 seconds)
+     … +2 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ All five steps implemented. Committing before the gate:
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      git add -A && git status --short…)  ⎿  M  bearlake-client/bearlake-client/App/BearLakeApp.swift
+     M  bearlake-client/bearlake-client/App/RootTabView.swift
+     M  bearlake-client/bearlake-client/Features/Auth/AuthViewModel.swift
+     … +22 lines (ctrl+o to expand)
+
+⏺ Now the gate: real app, real data, then kill the network.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-server
+      npm run dev > /Users/zachbagley/.claude/jobs/ef790223/tmp/s16.log 2>&1 &…)
+  ⎿  seeded: 2 announcements, 2 tips, 1 category, 1 article, 2 events
+
+  Called xcodebuild 2 times (ctrl+o to expand)
+
+⏺ Live data, no banner, admin + present. Let me warm the other caches before
+  pulling the plug.
+
+  Called xcodebuild 3 times (ctrl+o to expand)
+
+⏺ Article cached. Now the calendar, then I'll kill the server:
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ All four caches warm, and the + New event control is present (e117). Now
+  pulling the plug and relaunching cold:
+
+⏺ Bash(pkill -f "npm run dev" 2>/dev/null; pkill -f "tsx watch" 2>/dev/null;
+      sleep 3
+      echo "server reachable?"; curl -s -o /dev/null -m 3 -w "%{http_code}\n"
+      http://loc…)
+  ⎿  server reachable?
+     000
+       (connection refused — offline)
+  ⎿  (timeout 2m)
+
+  Called xcodebuild 3 times (ctrl+o to expand)
+
+⏺ Important finding from the gate: launching with no network lands on login —
+  and my step-4 clear runs on that path, wiping the cache. Let me look at
+  restore().
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '/func restore() async/,/^    }$/p'
+      Features/Auth/AuthViewModel.swift…)
+  ⎿      func restore() async {
+             guard await tokens.hasSession else {
+                 state = .signedOut
+     … +23 lines (ctrl+o to expand)
+
+⏺ Worse than it looked — restore() also calls tokens.clear(), so one launch
+  without signal permanently signs the user out. Let me check the refresh path
+  too:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '175,215p' Services/APIClient.swift…)
+  ⎿      /// second caller entering while the first is suspended finds the
+     task
+         /// already stored and awaits it.
+     … +40 lines (ctrl+o to expand)
+
+⏺ Confirmed — the refresh path has the same flaw: any failure, including a
+  dropped wifi, is treated as "the refresh token is dead". Let me see how
+  network errors are typed:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '1,55p' Services/APIError.swift | grep -vE "^\s*$"…)
+  ⎿  //
+     //  APIError.swift
+     //  bearlake-client
+     … +46 lines (ctrl+o to expand)
+
+⏺ Now the fix — in all three places, distinguishing "the token is dead" from "we
+  couldn't ask":
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  patched Services/APIClient.swift
+     patched Features/Auth/AuthViewModel.swift
+     ---build---
+  ⎿  (timeout 10m)
+
+⏺ Now tests pinning this — a network blip must not destroy the session or the
+  cache:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+     ** TEST FAILED **
+     /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests/Offlin
+     … +7 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+     ** TEST FAILED **
+     Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     … +7 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      rm -rf /private/tmp/claude-501/-Users-zachbagley-bearlake/8e08b45b-c0fc-48
+      ca-8370-d9ada406f2d0/scratchpad/t5.xcres…)
+  ⎿  ### offlineRestoreKeepsEverything
+                   "name" : "Caught error: .unexpectedStatus(-25299)",
+     ### rejectedTokenClearsEverything
+  ⎿  (timeout 10m)
+⏺ -25299 is errSecDuplicateItem — parallel tests sharing one real Keychain
+  account. Let me check whether TokenStore can be isolated:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      grep -n "init(\|let service\|let account\|struct KeychainStore\|protocol "
+      Services/TokenStore.swi…)
+  ⎿  Services/TokenStore.swift:24:    init(
+     Services/KeychainStore.swift:12:protocol SecureStore: Sendable {
+     Services/KeychainStore.swift:28:struct KeychainStore: SecureStore {
+     … +21 lines (ctrl+o to expand)
+
+⏺ There's already an InMemorySecureStore for exactly this. Using it:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  replaced 2 occurrences
+     Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (68927)' (0.000 seconds)
+     … +2 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ 389 green. Let me isolate the two remaining real-Keychain uses for hygiene,
+  then run the gate properly:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  isolated 2 more
+     server back up
+
+  Called xcodebuild 5 times (ctrl+o to expand)
+
+⏺ Signed in, cache warm. Now killing the server and pulling to refresh:
+
+⏺ Bash(pkill -f "npm run dev" 2>/dev/null; pkill -f "tsx watch" 2>/dev/null;
+      sleep 3
+      curl -s -o /dev/null -m 3 http://localhost:3000/api/v1/me; echo "server
+      stopped (e…)
+  ⎿  server stopped (exit 7)
+  ⎿  (timeout 2m)
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ Home passes: banner present, content intact, and the New announcement + button
+  is gone from the targets list. Screenshot:
+
+  Read 1 file, called xcodebuild (ctrl+o to expand)
+
+⏺ Exactly right — banner, cached content, and no + in the Announcements header.
+  Now Information and Calendar:
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ Information passes too — both + buttons gone, and the quick-tip rows are no
+  longer tap targets (editing removed). Into the article:
+
+  Called xcodebuild 2 times (ctrl+o to expand)
+
+⏺ A real defect, and exactly the one CacheFallback warns about. The article was
+  never cached this session, so the error is correct — but the view also renders
+  "Nothing here yet — Add some content with the edit button" underneath it.
+  That tells the user the article is empty when the truth is we couldn't load
+  it.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== ArticleViewModel.isEmpty ==="; grep -n "var isEmpty" -A 3
+      Features/Information/ArticleVi…)
+  ⎿  === ArticleViewModel.isEmpty ===
+     50:    var isEmpty: Bool {
+     51-        hasLoadedOnce && (article?.blocks.isEmpty ?? true)
+     … +17 lines (ctrl+o to expand)
+
+⏺ The right rule: an empty state is only truthful when the load actually
+  succeeded.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      grep -rn "\.isEmpty" Features/Home/HomeView.swift
+      Features/Information/InformationView.swift | gre…)
+  ⎿  Features/Information/InformationView.swift:133:            if model.qu
+     ickTips.isEmpty {
+     Features/Information/InformationView.swift:183:            if model.ca
+     … +5 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '68,74p;113,119p' Features/Home/HomeView.swift…)
+  ⎿      private var announcementsSection: some View {
+             Section {
+                 if model.announcements.isEmpty {
+     … +26 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  patched Features/Home/HomeView.swift
+     patched Features/Information/InformationView.swift
+     patched Features/Home/AllAnnouncementsView.swift
+     … +3 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+     Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (71101)' (1.000 seconds)
+     … +2 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+⏺ 391 green. Now re-running the gate on a properly warmed cache — including the
+  article this time:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-server
+      npm run dev > /Users/zachbagley/.claude/jobs/ef790223/tmp/s18.log 2>&1 &…)
+  ⎿  server up
+
+  Called xcodebuild 2 times (ctrl+o to expand)
+
+⏺ Signed in automatically — the Keychain token survived the earlier offline
+  launch, which is the restore fix working. Warming the article and calendar:
+
+  Called xcodebuild 3 times (ctrl+o to expand)
+
+⏺ Article cached with Edit article present. Now the calendar, then the plug:
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ All four caches warm. Killing the server and refreshing the calendar:
+
+⏺ Bash(pkill -f "npm run dev" 2>/dev/null; pkill -f "tsx watch" 2>/dev/null;
+      sleep 3
+      curl -s -o /dev/null -m 3 http://localhost:3000/api/v1/me; echo "offline
+      (curl exi…)
+  ⎿  offline (curl exit 7)
+  ⎿  (timeout 2m)
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ Calendar passes — banner, day markers intact ("28, has events" … "2, has
+  events"), and New event + is gone.
+
+  Read 1 file, called xcodebuild (ctrl+o to expand)
+
+⏺ Now the two remaining checks: the cached article, and that tapping an event
+  gives read-only detail.
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ The cached event is pinned to the day detail. Tapping it — as the creator,
+  this would be the editor online:
+
+  Read 1 file, called xcodebuild 2 times (ctrl+o to expand)
+
+⏺ Read-only detail — no Edit, no Delete. Let me dismiss and check the cached
+  article.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      grep -n "toolbar\|Button\|dismiss\|Close\|Done"
+      Features/Calendar/EventDetailView.swift | head -20)
+  ⎿  48:            .toolbar {
+     51:                        Button(action: onEdit) {
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '40,66p' Features/Calendar/EventDetailView.swift)
+  ⎿                  }
+
+                     Section {
+     … +25 lines (ctrl+o to expand)
+
+⏺ Confirmed a real defect the gate exposed: EventDetailView's toolbar has only
+  an optional Edit button. With onEdit nil, the sheet has no visible way to
+  close — swipe-down only. That's pre-existing (members viewing others' events),
+  but Phase 10 just made it the path everyone hits offline.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '1,30p' Features/Calendar/EventDetailView.swift…)
+  ⎿  //
+     //  EventDetailView.swift
+     //  bearlake-client
+     … +59 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  patched Features/Calendar/EventDetailView.swift
+     patched Features/Calendar/EventDetailView.swift
+     patched Features/Calendar/CalendarMonthView.swift
+     ---build---
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -E…)
+  ⎿  Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (73273)' (0.000 seconds)
+     count:
+     391
+  ⎿  (timeout 10m)
+
+⏺ Now the last gate item — the cached article offline, with the fixed empty
+  state:
+
+  Called xcodebuild 2 times (ctrl+o to expand)
+
+⏺ Server's still down, so it's on login — and the cache should have survived.
+  Let me sign in, immediately kill the server, and go to the article without
+  loading it online:
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-server
+      npm run dev > /Users/zachbagley/.claude/jobs/ef790223/tmp/s19.log 2>&1 &…)
+  ⎿  server up
+
+  Called xcodebuild 3 times (ctrl+o to expand)
+
+⏺ Signed in. Killing the server before touching the article — so anything shown
+  must come from the previous session's cache:
+
+⏺ Bash(pkill -f "npm run dev" 2>/dev/null; pkill -f "tsx watch" 2>/dev/null;
+      sleep 3
+      curl -s -o /dev/null -m 3 http://localhost:3000/api/v1/me; echo "offline
+      (exit $?)…)
+  ⎿  offline (exit 7)
+  ⎿  (timeout 2m)
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ Cache survived the earlier offline launch — quick tips and "Boat" are from the
+  previous session. Into the article:
+
+  Called xcodebuild 2 times (ctrl+o to expand)
+
+⏺ The empty-state fix works — only the error now, no misleading "Nothing here
+  yet". But the article should have been cached last session. Let me check the
+  wiring:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== does CategoryView pass cache to ArticleView? ==="…)
+  ⎿  === does CategoryView pass cache to ArticleView? ===
+     56:                    ArticleView(
+     57-                        auth: auth, api: api,
+     … +8 lines (ctrl+o to expand)
+
+⏺ Found it — CategoryView never passes cache to ArticleView, so articles got
+  cache: nil and were never cached at all. Unit tests missed it because they
+  inject the store directly. Let me fix and audit every construction site:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  CategoryView -> ArticleView wired
+
+     === audit: every view construction outside #Preview, and whether cache
+     … +16 lines (ctrl+o to expand)
+
+⏺ All real call sites now pass it. But a silent nil default is what let this
+  ship — let me make the compiler enforce it instead:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  required in Features/Home/HomeView.swift
+     required in Features/Home/AllAnnouncementsView.swift
+     required in Features/Information/InformationView.swift
+     … +10 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  preview fixed Features/Home/HomeView.swift
+     preview fixed Features/Home/HomeView.swift
+     /Users/zachbagley/bearlake/bearlake-client/bearlake-client/Features/In
+     … +6 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '133,142p' Features/Information/ArticleView.swift; echo "---"; sed
+      -n '178,186p' Features/C…)
+  ⎿  #Preview {
+         NavigationStack {
+             ArticleView(
+     … +37 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  Features/Information/ArticleView.swift: fixed 1 preview(s)
+     Features/Calendar/CalendarMonthView.swift: fixed 1 preview(s)
+     Features/Information/CategoryView.swift: fixed 2 preview(s)
+     … +7 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  ok
+     /Users/zachbagley/bearlake/bearlake-client/bearlake-client/Features/Ho
+     me/AllAnnouncementsView.swift:143:65: error: missing argument for para
+     … +16 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  ok
+     Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (75509)' (0.000 seconds)
+     … +2 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ 391 green, zero warnings, and cache is now a required parameter on all six
+  views — the missing wire would be a build error. Re-running the gate on the
+  article:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-server
+      npm run dev > /Users/zachbagley/.claude/jobs/ef790223/tmp/s20.log 2>&1 &…)
+  ⎿  server up
+
+  Called xcodebuild 2 times (ctrl+o to expand)
+
+⏺ Signed in via the restored token. Loading the article online so it caches,
+  then killing the server:
+
+  Called xcodebuild 3 times (ctrl+o to expand)
+
+⏺ Article loaded online (and now genuinely cached). Killing the server and
+  pulling to refresh this screen:
+
+⏺ Bash(pkill -f "npm run dev" 2>/dev/null; pkill -f "tsx watch" 2>/dev/null;
+      sleep 3
+      curl -s -o /dev/null -m 3 http://localhost:3000/api/v1/me; echo "offline
+      (exit $?)…)  ⎿  offline (exit 7)
+  ⎿  (timeout 2m)
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ The article renders fully from cache — heading, paragraph, all three bullets —
+  with the banner, and Edit article is gone.
+
+  Read 1 file, called xcodebuild (ctrl+o to expand)
+
+⏺ Gate met on all four screens. Cleaning up and committing:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-server
+      npm run dev > /Users/zachbagley/.claude/jobs/ef790223/tmp/s21.log 2>&1 &…)
+  ⎿  Error: Exit code 1
+     del article: Starting the boat
+     del category: Boat
+     del tip
+     del tip
+     del announcement
+     del announcement
+     Traceback (most recent call last):
+       File "<stdin>", line 20, in <module>
+       File "<stdin>", line 7, in call
+     … +13 lines (ctrl+o to expand)
+
+⏺ Articles, categories, tips, and announcements cleared. The events query needs
+  ISO instants:
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      python3 - <<'PY'…)
+  ⎿  del event: Hansen family stay
+     del event: Cousins visiting
+     remaining events: {'events': []}
+     … +4 lines (ctrl+o to expand)
+
+⏺ All test data removed. Recording the phase in the plan:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  plan updated
+     821:#### Phase 10 status — ✅ COMPLETE
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      git add -A && git status --short…)
+  ⎿  M  bearlake-client/bearlake-client/Features/Auth/AuthViewModel.swift
+     M  bearlake-client/bearlake-client/Features/Calendar/CalendarMonthView
+     .swift
+     … +17 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      git push -q -u origin client-phase-10 2>&1 | tail -3…)
+  ⎿  remote: Create a pull request for 'client-phase-10' on GitHub by visit
+     ing:
+     remote:      https://github.com/szachbagley/bearlake/pull/new/client-p
+     … +3 lines (ctrl+o to expand)
+  ⎿  (timeout 5m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      git status --short; echo "--- (empty = clean) ---"…)
+  ⎿  --- (empty = clean) ---
+     OPEN  Phase 10: SwiftData offline cache  https://github.com/szachbagle
+     y/bearlake/pull/30
+
+⏺ Phase 10 complete. PR #30 (https://github.com/szachbagley/bearlake/pull/30) —
+  391 tests green, zero warnings, tree clean.
+
+  The gate found four things the tests could not
+
+  Every unit test passed before each of these. That's the headline, so I'll lead
+  with the worst one.
+
+  restore() and refreshSession() treated a network failure as a dead token. Both
+  cleared the Keychain and signed the user out. So opening the app at the cabin
+  with no signal was a permanent sign-out — and once step 4's "clear the cache
+  on sign-out" landed, that same blip destroyed the offline cache. The feature
+  deleted itself under exactly the conditions it was built for.
+
+  It's pre-existing, from Phase 2/3. Phase 10 made it fatal. The fix is one
+  distinction: a dropped connection says nothing about whether a credential is
+  valid.
+
+  CategoryView never passed cache to ArticleView — so articles were never cached
+  at all. My tests missed it because they inject the store straight into the
+  ViewModel; only the running app exercises the wire. I didn't write a test for
+  this one: a test would just restate the wiring. Instead cache is now a
+  required parameter on all six views, so the next missing wire is a build
+  error. The compiler found two more previews I'd have shipped broken.
+
+  The other two: an uncached article rendered "Nothing here yet. Add some 
+  content" underneath the connection error — two contradictory claims, and the
+  false one is the reassuring one. And EventDetailView had no dismiss button
+  when onEdit was nil, relying on swipe-to-dismiss.
+
+  The design decision worth defending
+
+  An empty cache is a miss, not an empty result. Rendering [] tells the family
+  there are no events booked when the truth is we couldn't ask. Six ViewModels
+  make that call, so it lives in CacheFallback once.
+
+  Event pruning uses CabinDate.event(_:fallsOn:) rather than a string comparison
+  I'd have written fresh — all-day and timed events get judged by the same
+  tested rule. I checked the prune tests have teeth by disabling the prune:
+  three failed, and the two that shouldn't care still passed.
+
+  Verified with the API stopped
+
+  All four screens showed the banner over cached content with mutating controls
+  gone — and a cached event opened read-only even for its creator, because an
+  editor opened offline can't save. The cache survived a relaunch with the
+  server down, which is the restore fix proven end to end.
+
+  Two limitations I did not paper over
+
+  Launching with no network still lands on login. The access token is
+  memory-only, so a cold start must refresh. Nothing is destroyed now and the
+  next launch with signal signs in silently — but the cache is only reachable
+  within a session that already authenticated. Making it reachable at launch
+  means caching the session identity, which is a different decision from C45. I
+  flagged it for Phase 11 rather than expanding scope.
+
+  Offline articles show photos as unavailable — image blocks persist the S3 key,
+  never the presigned URL (C34), and ImageCache is in-memory. Honest, but worth
+  knowing before someone reports it.
+
+  Test data deleted; local server stopped.
+
+✻ Worked for 46m 6s
+
+※ recap: Building the Bear Lake iOS client phase by phase; Phase 10, the SwiftData offline cache, is done and opened as PR #30 with 391 tests passing. Next: merge it, then start Phase 11 on a new branch.
+
+❯ PR merged. Switch back to master and Execute Phase 11 of client-dev-plan.md   
+  on a new branch, one step at a time. At the end of each step, review, test    
+  (if applicable), evaluate, and report on your work; at the end of the phase,  
+  open a PR, then stop and report on your work for the whole phase. No need to  
+  stop between steps unless you need my help.                                   
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      git checkout -q master && git pull -q --ff-only && git log --oneline -2…)
+  ⎿  a8b5a4e Merge pull request #30 from szachbagley/client-phase-10
+     41f2b7e Phase 10 gate: four defects the simulator found that the tests
+      did not
+     --- on branch: client-phase-11 ---
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      sed -n '/^### Phase 11 — Hardening, accessibility, and install/,/^## /p'
+      client-dev-plan.md)
+  ⎿  ### Phase 11 — Hardening, accessibility, and install
+
+     **Steps:**
+     … +26 lines (ctrl+o to expand)
+
+⏺ Final phase. Steps 6 and 8 need you (a physical device; a distribution
+  decision), and step 7 mutates production — I'll do 1–5 first, then come back
+  to those.
+
+  Step 1: full §6 checklist review of the whole codebase.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== 1. ViewModels must not import SwiftUI ==="…)
+  ⎿  === 1. ViewModels must not import SwiftUI ===
+       (no output above = clean)
+     … +11 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== URLSession in ArticleEditorViewModel — code or prose? ==="…)
+  ⎿  === URLSession in ArticleEditorViewModel — code or prose? ===
+     178:        // The progress callback arrives on URLSession's delegate
+     queue and
+     … +16 lines (ctrl+o to expand)
+
+⏺ Two findings. The URLSession hit is prose in a comment, but
+  AnnouncementEditorView calls the API directly from a View — a real checklist
+  violation:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '1,40p' Features/Home/AnnouncementEditorView.swift | grep -vE
+      "^\s*$"…)
+  ⎿  //
+     //  AnnouncementEditorView.swift
+     //  bearlake-client
+     … +77 lines (ctrl+o to expand)
+⏺ Confirmed — this View owns networking, save state, validation, and error
+  handling, while every other editor has a ViewModel. Let me see the rest before
+  extracting:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '35,100p' Features/Home/AnnouncementEditorView.swift)
+  ⎿          self.draft = draft
+             self.onFinished = onFinished
+             _text = State(initialValue: draft.existing?.body ?? "")
+     … +63 lines (ctrl+o to expand)
+
+⏺ Extracting a ViewModel, matching the pattern the other editors already use:
+
+⏺ Write(bearlake-client/Features/Home/AnnouncementEditorViewModel.swift)
+  ⎿  Wrote 80 lines to
+     bearlake-client/Features/Home/AnnouncementEditorViewModel.swift
+      1 //
+      2 //  AnnouncementEditorViewModel.swift
+      3 //  bearlake-client
+      5 //  Phase 11, step 1. Extracted from `AnnouncementEditorView`, wh
+        ich was the
+      6 //  one editor in the app still doing its own networking, save st
+        ate, and
+        a ViewModel.
+      8 //  Found by the §6 checklist pass rather than by a failure.
+      9 //
+     … +84 lines (ctrl+o to expand)
+
+⏺ Write(bearlake-client/Features/Home/AnnouncementEditorView.swift)
+  ⎿  Added 38 lines, removed 66 lines
+      15  /// Create or edit an announcement. Admin-only, enforced by the
+           server.
+      16  ///
+      17  /// `postedAt` is displayed but never editable: the server sets
+           it on create
+      18 -/// and an update sends **`{body}` and nothing else**. Sending 
+         -anything more                                                  
+      19 -/// is a 400 under the strict-body rule (C15).                 
+      18 +/// and an update sends **`{body}` and nothing else** (C15). Al
+         +l of that lives                                                
+      19 +/// in `AnnouncementEditorViewModel`; this file is presentation
+         + only.                                                         
+      20  struct AnnouncementEditorView: View {
+      21 -    let api: BearLakeAPI                                       
+      22 -    let draft: AnnouncementDraft                               
+      21 +    @State private var model: AnnouncementEditorViewModel      
+      22      var onFinished: @MainActor (Announcement?) -> Void
+      23  
+      25 -    @State private var text: String                            
+      26 -    @State private var isSaving = false                        
+      27 -    @State private var errorMessage: String?                   
+      24      @State private var isConfirmingDiscard = false
+      25      @FocusState private var isFocused: Bool
+      26  
+      31 -    private let dates = CabinDate()                            
+      32 -                                                               
+      33 -    init(api: BearLakeAPI, draft: AnnouncementDraft, onFinished
+         -: @escaping @MainActor (Announcement?) -> Void) {              
+      34 -        self.api = api                                         
+      35 -        self.draft = draft                                     
+      27 +    init(                                                      
+      28 +        api: BearLakeAPI,                                      
+      29 +        draft: AnnouncementDraft,                              
+      30 +        onFinished: @escaping @MainActor (Announcement?) -> Voi
+         +d                                                              
+      31 +    ) {                                                        
+      32 +        _model = State(initialValue: AnnouncementEditorViewMode
+         +l(                                                             
+      33 +            api: api, existing: draft.existing                 
+      34 +        ))                                                     
+      35          self.onFinished = onFinished
+      37 -        _text = State(initialValue: draft.existing?.body ?? "")
+      36      }
+      37  
+      40 -    private var isEditing: Bool { draft.existing != nil }      
+      41 -    private var trimmed: String { text.trimmingCharacters(in: .
+         -whitespacesAndNewlines) }                                      
+      42 -    private var isOverLength: Bool { text.count > Limits.announ
+         -cementBodyMax }                                                
+      43 -    /// The same rule the tests exercise, so the button and the
+         - assertion                                                     
+      44 -    /// cannot drift apart.                                    
+      45 -    private var canSave: Bool {                                
+      46 -        AnnouncementsViewModel.validationProblem(body: text) ==
+         - nil && isSaving == false                                      
+      47 -    }                                                          
+      48 -    private var hasChanges: Bool { trimmed != (draft.existing?.
+         -body ?? "") }                                                  
+      49 -                                                               
+      38      var body: some View {
+      39          NavigationStack {
+      40              Form {
+      41                  Section {
+      54 -                    TextEditor(text: $text)                    
+      55 -                        .frame(minHeight: 160)                 
+      56 -                        .focused($isFocused)                   
+      57 -                        .accessibilityLabel("Announcement text"
+         -)                                                              
+      42 +                    TextEditor(text: Binding(                  
+      43 +                        get: { model.text }, set: { model.setTe
+         +xt($0) }                                                       
+      44 +                    ))                                         
+      45 +                    .frame(minHeight: 160)                     
+      46 +                    .focused($isFocused)                       
+      47 +                    .accessibilityLabel("Announcement text")   
+      48                  } header: {
+      49                      Text("Announcement")
+      50                  } footer: {
+      51                      VStack(alignment: .leading, spacing: 4) {
+      52                          // Live counter, so the limit is visibl
+          e before the
+      53                          // server rejects it rather than after.
+      64 -                        Text("\(text.count) / \(Limits.announce
+         -mentBodyMax)")                                                 
+      65 -                            .foregroundStyle(isOverLength ? .re
+         -d : .secondary)                                                
+      66 -                        if let errorMessage {                  
+      54 +                        Text("\(model.characterCount) / \(Limit
+         +s.announcementBodyMax)")                                       
+      55 +                            .foregroundStyle(model.isOverLength
+         + ? .red : .secondary)                                          
+      56 +                        if let errorMessage = model.errorMessag
+         +e {                                                            
+      57                              Text(errorMessage).foregroundStyle(
+          .red)
+      58                          }
+      59                      }
+      60                  }
+      61  
+      72 -                if let existing = draft.existing {             
+      62 +                if let postedLabel = model.postedLabel {       
+      63                      Section("Posted") {
+      74 -                        Text(dates.dateLabel(from: existing.pos
+         -tedAt))                                                        
+      64 +                        Text(postedLabel)                      
+      65                              .foregroundStyle(.secondary)
+      76 -                            .accessibilityLabel(               
+      77 -                                "Posted \(dates.dateLabel(from:
+         - existing.postedAt)). Not editable."                           
+      78 -                            )                                  
+      66 +                            .accessibilityLabel("Posted \(poste
+         +dLabel). Not editable.")                                       
+      67                      }
+      68                  }
+      69              }
+      82 -            .navigationTitle(isEditing ? "Edit Announcement" : 
+         -"New Announcement")                                            
+      70 +            .navigationTitle(model.isEditing ? "Edit Announceme
+         +nt" : "New Announcement")                                      
+      71              .navigationBarTitleDisplayMode(.inline)
+      72              .toolbar {
+      73                  ToolbarItem(placement: .cancellationAction) {
+      74                      Button("Cancel") {
+      87 -                        if hasChanges {                        
+      75 +                        if model.hasChanges {                  
+      76                              isConfirmingDiscard = true
+      77                          } else {
+      78                              onFinished(nil)
+     ...
+       80                      }
+       81                  }
+       82                  ToolbarItem(placement: .confirmationAction) {
+       95 -                    if isSaving {                             
+       83 +                    if model.isSaving {                       
+       84                          ProgressView()
+       85                      } else {
+       98 -                        Button("Save", action: save).disabled(
+          -canSave == false)                                             
+       86 +                        Button("Save") {                      
+       87 +                            Task {                            
+       88 +                                if let saved = await model.sav
+          +e() { onFinished(saved) }                                     
+       89 +                            }                                 
+       90 +                        }                                     
+       91 +                        .disabled(model.canSave == false)     
+       92                      }
+       93                  }
+       94              }
+     ...
+      100                  Button("Discard", role: .destructive) { onFini
+           shed(nil) }
+      101                  Button("Keep Editing", role: .cancel) {}
+      102              }
+      110 -            .disabled(isSaving)                               
+      103 +            .disabled(model.isSaving)                         
+      104              .task { isFocused = true }
+      105          }
+      106      }
+      114 -                                                              
+      115 -    private func save() {                                     
+      116 -        guard canSave else { return }                         
+      117 -        isSaving = true                                       
+      118 -        errorMessage = nil                                    
+      119 -        Task {                                                
+      120 -            defer { isSaving = false }                        
+      121 -            do {                                              
+      122 -                let saved: Announcement                       
+      123 -                if let existing = draft.existing {            
+      124 -                    saved = try await api.updateAnnouncement(i
+          -d: existing.id, body: trimmed)                                
+      125 -                } else {                                      
+      126 -                    saved = try await api.createAnnouncement(b
+          -ody: trimmed)                                                 
+      127 -                }                                             
+      128 -                onFinished(saved)                             
+      129 -            } catch let error as APIError {                   
+      130 -                errorMessage = error.message                  
+      131 -            } catch {                                         
+      132 -                errorMessage = "Couldn't save that announcemen
+          -t."                                                           
+      133 -            }                                                 
+      134 -        }                                                     
+      135 -    }                                                         
+      107  }
+      108  
+      109  #Preview("New") {
+     ...
+      116      AnnouncementEditorView(
+      117          api: PreviewAPI(),
+      118          draft: AnnouncementDraft(existing: Announcement(
+      148 -            id: "1", body: "The marina passcode this summer is
+          - 845256.",                                                    
+      149 -            postedAt: Date(timeIntervalSince1970: 1_785_585_60
+          -0),                                                           
+      119 +            id: "a1",                                         
+      120 +            body: "The marina gate code changed to 4417 for th
+          +e rest of the season.",                                       
+      121 +            postedAt: Date(),                                 
+      122              createdBy: "u1",
+      151 -            createdAt: Date(timeIntervalSince1970: 1_785_585_6
+          -00),                                                          
+      152 -            updatedAt: Date(timeIntervalSince1970: 1_785_585_6
+          -00)                                                           
+      123 +            createdAt: Date(),                                
+      124 +            updatedAt: Date()                                 
+      125          )),
+      126          onFinished: { _ in }
+      127      )
+  ⎿  Found 10 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -E…)
+  ⎿  Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (88998)' (0.000 seconds)
+     count:
+     391
+  ⎿  (timeout 10m)
+  ⎿  Found 10 new diagnostic issues in 1 file (ctrl+o to expand)
+
+⏺ Now the new ViewModel deserves tests, since it's now testable:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      cat >> AnnouncementsViewModelTests.swift <<'EOF'…)
+  ⎿  ** TEST FAILED **
+     Test case 'AnnouncementEditorViewModelTests/editUpdates()' failed on '
+     Clone 1 of iPhone 17 - bearlake-client (89821)' (0.000 seconds)
+     … +4 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      rm -rf /private/tmp/claude-501/-Users-zachbagley-bearlake/8e08b45b-c0fc-48
+      ca-8370-d9ada406f2d0/scratchpad/t6.xcres…)
+  ⎿                "name" : "Expectation failed: await model.save() → nil",
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      grep -n "func updateAnnouncement" -A 12 FakeAPI.swift)
+  ⎿  144:    func updateAnnouncement(id: String, body: String) async throws
+      -> Announcement {
+     145-        try record("updateAnnouncement")
+     … +12 lines (ctrl+o to expand)
+
+⏺ My test bug — the fake needs the announcement seeded before it can update it:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      python3 - <<'PY'…)
+  ⎿  ok
+     Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (91361)' (0.000 seconds)
+     … +2 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ 396 green. Continuing the step 1 sweep — the remaining checklist items:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== re-check: any api. call left in a View? ==="…)
+  ⎿  === re-check: any api. call left in a View? ===
+       clean
+     … +6 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== Destructive actions: each should be behind a confirm ==="…)
+  ⎿  === Destructive actions: each should be behind a confirm ===
+     --- delete call sites in ViewModels ---
+     Home/AnnouncementsViewModel.swift:102:            try await api.delete
+     … +31 lines (ctrl+o to expand)
+
+⏺ All five delete paths are behind confirmation dialogs. Last step-1 item — the
+  spec cross-check for invented screens:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== every top-level screen/sheet in the app ==="…)
+  ⎿  === every top-level screen/sheet in the app ===
+     AllAnnouncementsView.swift:9  AllAnnouncementsView
+     AnnouncementEditorView.swift:20  AnnouncementEditorView
+     … +26 lines (ctrl+o to expand)
+
+⏺ Screen inventory matches the spec — no invented screens. One last item:
+  PreviewSupport computes "30 days ago" with TimeInterval arithmetic, the exact
+  pattern C29 forbids. Preview-only, but it's a bad example sitting in the
+  codebase:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '70,92p' Services/PreviewSupport.swift)
+  ⎿      func deleteEvent(id: String) async throws {}
+
+         func listAnnouncements(limit: Int?, cursor: String?) async throws
+     … +20 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      grep -n "let previewDate\|previewDate =" Services/PreviewSupport.swift |
+      head -3)
+  ⎿  17:private let previewDate = Date(timeIntervalSince1970: 1_785_585_600
+     )  // 2026-08-01
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)  ⎿  ok
+     Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (92418)' (0.000 seconds)
+     … +6 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Step 1 complete — 396 tests green. Two real findings, both fixed. The one
+  remaining addingTimeInterval is a 600-second pasteboard expiry — a duration,
+  not calendar math, so outside C29.
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      git add -A && git commit -q -F - <<'MSG'…)
+  ⎿  22de98d Phase 11 step 1: §6 checklist pass over the whole codebase
+
+⏺ Step 2: security sweep, each item verified by grep and/or test.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== 2a. Refresh token ONLY in Keychain; nothing sensitive in
+      UserDefaults ==="…)
+  ⎿  === 2a. Refresh token ONLY in Keychain; nothing sensitive in UserDefau
+     lts ===
+     Services/KeychainStore.swift:24:/// The refresh token lives here and n
+     … +16 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== 2a (cont). Access token: memory only, never persisted ==="…)
+  ⎿  === 2a (cont). Access token: memory only, never persisted ===
+     Services/TokenStore.swift:19:    private(set) var accessToken: String?
+     Services/TokenStore.swift:43:        accessToken = session.accessToken
+     … +39 lines (ctrl+o to expand)
+
+⏺ 2a verified: UserDefaults is never referenced (only named in a comment), the
+  refresh token only ever reaches secureStore.save → Keychain, and the access
+  token is a plain in-memory actor property. Now logging:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== 2b. Any logging at all in the app target ==="…)
+  ⎿  === 2b. Any logging at all in the app target ===
+       ZERO logging calls of any kind in the app target
+     … +3 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== 2d. C34 — no 'url' in any write payload ==="…)
+  ⎿  === 2d. C34 — no 'url' in any write payload ===
+     --- Block.encode: does the image case ever emit url? ---
+     20:        case .image(_, let key, let caption, _):
+     … +16 lines (ctrl+o to expand)
+
+⏺ 2d verified — the image branch destructures url as _ and never encodes it; no
+  request DTO has a url field. For 2e let me check the client's write payloads
+  against the server's actual zod schemas rather than the doc:
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      echo "=== SERVER schemas (authoritative) ==="…)
+  ⎿  === SERVER schemas (authoritative) ===
+     --- announcements.ts ---
+         id: z.string().uuid('must be a valid id'),
+     … +69 lines (ctrl+o to expand)
+
+⏺ The server uses z.strictObject — any extra key is a 400. Let me check whether
+  the exact key sets are already pinned by tests:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      grep -n "@Test" DTOTests.swift | head -30…)
+  ⎿  15:    @Test("PublicUser decodes, including a null lastLoginAt")
+     41:    @Test("timestamps decode with fractional seconds")
+     50:    @Test("timestamps decode without fractional seconds too")
+     … +17 lines (ctrl+o to expand)
+
+⏺ Partially covered. Let me pin every write payload's key set against the
+  server's strictObject schemas:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      sed -n '108,135p' DTOTests.swift)
+  ⎿  /// C15 — the server uses `z.strictObject`, so an extra key is a 400 r
+     ather
+     /// than a silently ignored field. These assert the exact wire shape.
+     … +24 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      cat >> DTOTests.swift <<'EOF'…)
+  ⎿  Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (93629)' (1.000 seconds)
+     count:
+     405
+  ⎿  (timeout 10m)
+
+⏺ 405 green (+9), and every C15/C34 assertion passed first time — the wire
+  shapes were already right; the tests now pin them. Let me record the sweep,
+  including one thing Phase 10 changed:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      tail -5 client-dev-plan.md…)
+  ⎿  - Anything discovered mid-build that contradicts this plan → stop, ame
+     nd §2 with the new decision and its rationale, then continue. The plan
+      stays truthful to what was built.
+     … +20 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      cat >> client-dev-plan.md <<'EOF'…)
+  ⎿  7025560 Phase 11 step 2: security sweep, recorded
+
+⏺ Step 3: accessibility pass. Starting with a static audit, then VoiceOver in
+  the simulator.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== icon-only controls (Image/Label without text) and whether each
+      has a label ==="…)
+  ⎿  === icon-only controls (Image/Label without text) and whether each has
+      a label ===
+       UNLABELLED? Information/ArticleEditorView.swift:275:            Imag
+     … +7 lines (ctrl+o to expand)
+⏺ My grep window was too narrow. Let me check each properly:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "### ArticleEditorView BlockRow (270-292)"; sed -n '270,292p'
+      Features/Information/ArticleEdi…)
+  ⎿  ### ArticleEditorView BlockRow (270-292)
+     private struct BlockRow: View {
+         let block: Block
+     … +60 lines (ctrl+o to expand)
+
+⏺ Two are fine (BlockRow combines; CachedAsyncImage has a label). Two small
+  fixes — a decorative icon should be hidden, and a labelled container should
+  ignore its children:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  patched App/BearLakeApp.swift
+     patched Features/Information/Blocks/CachedAsyncImage.swift
+     … +7 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== MonthGrid day cell: what is the actual tappable size? ==="…)
+  ⎿  === MonthGrid day cell: what is the actual tappable size? ===
+
+         /// The day number, read off the string rather than recomputed — t
+     … +39 lines (ctrl+o to expand)
+
+⏺ The 4pt dot is decorative inside a full-width contentShape(Rectangle()) cell,
+  and the 22pt icon sits inside a full-size row — both fine. The 28pt hour strip
+  is genuinely small, but it's a convenience tap (the full-size + is the
+  primary path). Now the simulator pass:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      xcodebuild test -scheme bearlake-client -destination 'platform=iOS
+      Simulator,name=iPhone 17' -quiet 2>&1 | grep -E…)
+  ⎿  Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (95033)' (1.000 seconds)
+     Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     … +23 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(xcrun simctl ui 9977EBF7-C60B-457D-B96D-F92942FBFDDF 2>&1 | grep -A 20
+      "content_size")
+  ⎿      content_size
+        When invoked without arguments prints the current preferred content
+     si
+     ze category, from the following possible values:
+     … +11 lines (ctrl+o to expand)
+
+⏺ Let me set up data, then check dark mode + Dynamic Type XXL together across
+  the screens.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-server
+      npm run dev > /Users/zachbagley/.claude/jobs/ef790223/tmp/s22.log 2>&1 &…)
+  ⎿  seeded
+     An error was encountered processing the command (domain=com.apple.Core
+     Simulator.SimError, code=405):
+     … +5 lines (ctrl+o to expand)
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ Bash(xcrun simctl ui 9977EBF7-C60B-457D-B96D-F92942FBFDDF appearance dark
+      xcrun simctl ui 9977EBF7-C60B-457D-B96D-F92942FBFDDF content_size
+      extra-extra-large…)
+  ⎿  appearance: dark
+     content_size: extra-extra-large
+
+  Read 1 file, called xcodebuild (ctrl+o to expand)
+
+⏺ Home is clean at dark + XXL. The month grid is the hard one — it truncated at
+  XXL back in Phase 5:
+
+  Read 1 file, called xcodebuild 3 times (ctrl+o to expand)
+
+⏺ XXL holds — all numbers legible, no truncation. The plan requires XXL; let me
+  check where it actually breaks by going to the largest accessibility size:
+
+⏺ Bash(xcrun simctl ui 9977EBF7-C60B-457D-B96D-F92942FBFDDF content_size
+      accessibility-extra-extra-extra-large
+      sleep 2; echo "content_size: $(xcrun simctl ui 9977EBF7-…)
+  ⎿  content_size: accessibility-extra-extra-extra-large
+
+  Read 1 file, called xcodebuild (ctrl+o to expand)
+
+⏺ At AX5 (five sizes beyond the plan's XXL requirement) two things break: the
+  month truncates to "A…" and the day numbers collide. XXL itself is clean, so
+  this isn't a plan violation — but "A…" on a core control is worth fixing. Let
+  me look at the header:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '/private var header: some View/,/^    }$/p'
+      Features/Calendar/CalendarMonthView.swift…)
+  ⎿      private var header: some View {
+             HStack {
+                 Button {
+     … +50 lines (ctrl+o to expand)
+
+⏺ The month label already has minimumScaleFactor; at AX5 the year picker's
+  fixedSize() squeezes it past that. The standard fix — and what Apple's
+  Calendar does — is to cap the grid chrome at a size that fits, and let the
+  content people actually read keep scaling:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '20,50p' Features/Calendar/MonthGrid.swift)
+  ⎿      var body: some View {
+             VStack(spacing: 4) {
+                 HStack(spacing: 2) {
+     … +27 lines (ctrl+o to expand)
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  patched Features/Calendar/MonthGrid.swift
+     patched Features/Calendar/CalendarMonthView.swift
+     ---build---
+  ⎿  (timeout 10m)
+
+  Called xcodebuild 3 times (ctrl+o to expand)
+
+⏺ "August 2026" is intact (e25), not "A…". Let me confirm visually at AX5:
+
+  Read 1 file, called xcodebuild (ctrl+o to expand)
+
+⏺ Chrome capped, content still scaling — the right split. Let me reset to XXL
+  and attempt actual VoiceOver, which the plan asks for explicitly:
+
+⏺ Bash(xcrun simctl ui 9977EBF7-C60B-457D-B96D-F92942FBFDDF content_size
+      extra-extra-large
+      xcrun simctl spawn 9977EBF7-C60B-457D-B96D-F92942FBFDDF defaults write
+      com.a…)
+  ⎿  VoiceOver flag: 1
+  ⎿  (timeout 3m)
+
+  Read 1 file, called xcodebuild (ctrl+o to expand)
+
+⏺ The flag sets but the accessibility daemon doesn't pick it up without a
+  Settings toggle — VoiceOver isn't actually running (no cursor). CLI-driven
+  VoiceOver isn't dependable here. Let me clear the flag and audit the
+  accessibility tree instead, which is the data VoiceOver consumes:
+
+⏺ Bash(xcrun simctl spawn 9977EBF7-C60B-457D-B96D-F92942FBFDDF defaults write
+      com.apple.Accessibility VoiceOverTouchEnabled -int 0
+      echo "VoiceOver flag reset to: $(xcr…)
+  ⎿  VoiceOver flag reset to: 0
+
+  Called xcodebuild 2 times (ctrl+o to expand)
+
+⏺ Every control is labelled, several richly ("26, today", "1, has events,
+  outside this month"). But plain days read as bare numbers — let me check what
+  VoiceOver would actually announce:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '/private var accessibilityLabel/,/^    }$/p'
+      Features/Calendar/MonthGrid.swift)
+  ⎿      private var accessibilityLabel: String {
+             var label = day.dateOnly
+             if let parts = day.dateOnly.split(separator: "-").last, let nu
+     … +10 lines (ctrl+o to expand)
+
+⏺ The grid reads as bare numbers — someone swiping hears "1, 2, 3…" with no
+  month or weekday, and the weekday header is hidden. That's the app's main
+  navigation surface. Let me see how CabinDate already formats date-only
+  strings:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '/func rangeLabel/,/^    }$/p' Utilities/CabinDate.swift | head
+      -45)
+  ⎿      func rangeLabel(for dates: EventDates) -> String {
+             switch dates {
+             case .allDay(let start, let end):
+     … +20 lines (ctrl+o to expand)
+
+⏺ The safe pattern already exists. Let me add a proper day label to CabinDate —
+  date formatting belongs there, not in the view:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      grep -n "private let dayFormatter\|dayFormatter =" -A 6
+      Utilities/CabinDate.swift | head -20)
+  ⎿  (No output)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      grep -n "dayFormatter\|timeFormatter\|dayTimeFormatter"
+      Utilities/CabinDate.swift | head…)
+  ⎿  115:                return dayFormatter.string(from: startDate)
+     120:            return "\(dayFormatter.string(from: startDate)) – \(da
+     yFormatter.string(from: endDate))"
+     … +24 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  CabinDate.spokenDayLabel added
+     MonthGrid label upgraded
+
+⏺ DayCell has no CabinDate — let me thread it through:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '1,20p' Features/Calendar/MonthGrid.swift…)
+  ⎿  //
+     //  MonthGrid.swift
+     //  bearlake-client
+     … +43 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  patched Features/Calendar/MonthGrid.swift
+     patched Features/Calendar/MonthGrid.swift
+     patched Features/Calendar/MonthGrid.swift
+     … +5 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '132,150p' Features/Calendar/MonthGrid.swift)
+  ⎿  }
+
+     #Preview {
+     … +12 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)  ⎿  ok
+     ---build---
+  ⎿  (timeout 10m)
+
+⏺ Now tests for the spoken label — including the timezone case that's bitten
+  this project before:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      cat >> CabinDateTests.swift <<'EOF'…)
+  ⎿  Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (98698)' (0.000 seconds)
+     count:
+     413
+  ⎿  (timeout 10m)
+
+⏺ 413 green (+8). Let me confirm the new labels in the running app:
+
+  Called xcodebuild 6 times (ctrl+o to expand)
+
+⏺ Every cell now announces its full date — "Wednesday, August 26, today",
+  "Tuesday, September 1, has events, outside this month" — while the visible
+  text stays a bare number.
+
+⏺ Bash(xcrun simctl ui 9977EBF7-C60B-457D-B96D-F92942FBFDDF content_size large
+      xcrun simctl ui 9977EBF7-C60B-457D-B96D-F92942FBFDDF appearance light…)
+  ⎿  98a1264 Phase 11 step 3: accessibility pass
+
+⏺ Step 4: date audit. Expecting zero outside CabinDate:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== 4a. Calendar.current / TimeZone.current outside CabinDate ==="…)
+  ⎿  === 4a. Calendar.current / TimeZone.current outside CabinDate ===
+       ZERO
+     … +18 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== C23: formatter options ==="…)
+  ⎿  === C23: formatter options ===
+         /// `createdAt`). Trying both is the only shape that cannot silent
+     ly fail.
+     … +43 lines (ctrl+o to expand)
+
+⏺ All four use CabinDate's text parser then the injected calendar — the safe
+  pattern, no ISO parsing of bare dates. C23 is correctly configured. But two
+  sites duplicate the same three-line dance:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      echo "=== where date(forDay:) is used, and what the Date() fallback would
+      do ==="…)
+  ⎿  === where date(forDay:) is used, and what the Date() fallback would do
+      ===
+     Features/Calendar/EventEditorView.swift:180:            get: { model.d
+     … +22 lines (ctrl+o to expand)
+
+⏺ That fallback is fine — it's only the get of a DatePicker binding and the
+  string stays authoritative. Let me consolidate the duplicated label conversion
+  into CabinDate:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  patched Utilities/CabinDate.swift
+     patched Features/Calendar/EventEditorViewModel.swift
+     patched Features/Calendar/CalendarViewModel.swift
+     ---build---
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      cat >> CabinDateTests.swift <<'EOF'…)
+  ⎿  Test case 'LoginTests/genericFailureMessage(error:)' passed on 'Clone
+     1 of iPhone 17 - bearlake-client (978)' (0.000 seconds)
+     count:
+     419
+  ⎿  (timeout 10m)
+
+⏺ 419 green. Step 4 done — the audit found zero violations, plus one
+  consolidation. Now step 5: performance sanity with a heavy month and a long
+  article:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-server
+      (curl -s -o /dev/null -m 2 http://localhost:3000/api/v1/me || npm run dev
+      > /Users/zachbagley/.claude/jobs/ef79022…)
+  ⎿  events created: 62
+     article blocks: 120
+
+  Called xcodebuild (ctrl+o to expand)
+
+  Called xcodebuild 4 times (ctrl+o to expand)
+
+⏺ Home picked the right next three from 62 events. Now the calendar — recording
+  while stepping months to check for stutter:
+
+  Called xcodebuild 2 times (ctrl+o to expand)
+
+⏺ Every August day now shows events. Stepping months back and forth under load:
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ Six month steps clean, and the selection rule held (July → selected Jul 1).
+  Now the 120-block article:
+  Called xcodebuild 2 times (ctrl+o to expand)
+
+⏺ Bash(echo "timing the 120-block article open..."; date +%s.%N)
+  ⎿  timing the 120-block article open...
+     1787774407.067908000
+
+  Called xcodebuild 3 times (ctrl+o to expand)
+
+⏺ Bash(AXE=/opt/homebrew/lib/node_modules/xcodebuildmcp/bundled/axe
+      UDID=9977EBF7-C60B-457D-B96D-F92942FBFDDF…)
+  ⎿  scrolling with raw coordinates (bypasses the a11y-tree round trip)
+     6 swipes issued in 15.376014000s
+  ⎿  (timeout 5m)
+
+  Read 1 file, called xcodebuild 2 times (ctrl+o to expand)
+
+⏺ Renders correctly at Section 84 of 120. But the snapshot failing to settle
+  points at how the blocks are built — let me check:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      sed -n '/var body: some View/,/^    }$/p'
+      Features/Information/ArticleView.swift | head -40)
+  ⎿      var body: some View {
+             ScrollView {
+                 VStack(alignment: .leading, spacing: 12) {
+     … +37 lines (ctrl+o to expand)
+
+⏺ Found it: a plain VStack builds all 120 blocks eagerly on open — and each
+  image block's .task would start loading immediately regardless of visibility.
+  LazyVStack is the fix, and C35's key-based cache is what makes it safe:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  LazyVStack
+     ---build---
+  ⎿  (timeout 10m)
+
+  Called xcodebuild 5 times (ctrl+o to expand)
+
+⏺ Element count dropped from 553 → 122 — only visible blocks are built now. Let
+  me confirm scrolling settles, which failed before:
+
+  Called xcodebuild (ctrl+o to expand)
+
+⏺ Swipe settles cleanly now. Last step-5 item — C35, that images don't refetch
+  on reappearance (which LazyVStack makes load-bearing):
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-clientTests
+      grep -n "@Test" ImageCacheTests.swift)
+  ⎿  48:    @Test("the same key with different presigned URLs fetches once"
+     )
+     66:    @Test("different keys are cached separately")
+     … +8 lines (ctrl+o to expand)
+
+⏺ C35 is already pinned by "the same key with different presigned URLs fetches 
+  once" — exactly the property that makes LazyVStack safe. Cleaning up the perf
+  fixtures:
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      python3 - <<'PY'…)
+  ⎿  events deleted: 63
+     articles deleted: 2
+     remaining events: {'events': []}
+     … +9 lines (ctrl+o to expand)
+  ⎿  (timeout 10m)
+
+⏺ Bash(cd /Users/zachbagley/bearlake
+      git add -A && git commit -q -F - <<'MSG'…)
+  ⎿  3493d84 Phase 11 steps 4-5: date audit and performance sanity
+
+⏺ Steps 1–5 are done. Steps 6–8 need you. Let me check exactly what's blocked
+  before asking:
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client/bearlake-client
+      grep -vE "^\s*$" Utilities/AppConfig.swift…)
+  ⎿  //
+     //  AppConfig.swift
+     //  bearlake-client
+     … +25 lines (ctrl+o to expand)
+
+⏺ Bash(echo "=== production API reachable? ==="
+      curl -s -o /dev/null -w "  /api/v1/me -> HTTP %{http_code}\n" -m 10
+      https://bearlake-server-production.up.railway.app/a…)
+  ⎿  === production API reachable? ===
+       /api/v1/me -> HTTP 401
+     {
+     … +7 lines (ctrl+o to expand)
+
+⏺ Production is up and answering correctly. Steps 6–8 all need you, so let me
+  record steps 1–5 in the plan before pausing.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  plan updated
+     929f947 Phase 11: record steps 1-5 in the plan
+⏺ User answered Claude's questions:
+  ⎿  · Step 7 is a production smoke test — login, CRUD one of each resource, an 
+     article with a real uploaded image, sign out, then clean up. It needs a 
+     production account credential, which isn't derivable from the repo (user 
+     passwords are bcrypt hashes in the prod DB). How do you want to handle it? 
+     → Create a throwaway prod member
+     · Step 8 asks explicitly for your decision rather than an assumption: how 
+     should the family install this? → The app will be published (unlisted) on 
+     the App Store so it can be downloaded by anyone with the link.
+     · Step 9 tags client-v1. The plan's gate requires the smoke transcript 
+     first — should I tag before or after the device run? → Wait for the device 
+     run (Recommended)
+
+⏺ Recording the distribution decision and preparing the smoke test while you set
+  up the account.
+
+⏺ Bash(cd /Users/zachbagley/bearlake/bearlake-client
+      python3 - <<'PY'…)
+  ⎿  C55 + §9 recorded
+     d5dbf14 Phase 11 step 8: distribution decided — unlisted App Store (C5
+     5)
+
+⏺ Steps 1–5 complete, step 8 decided and recorded. 419 tests green, zero 
+  warnings. I need one thing from you to finish step 7.
+
+  What I need
+
+  In the web app against production, create a throwaway user:
+
+  - Role: member, not admin — a member can't reach the destructive admin paths,
+    so a mistake on my side can't touch real family data. It also tests the more
+    restrictive role, which is the one worth proving.
+  - Any name/email, e.g. Smoke Test / smoke-test@example.com
+
+  The server will show you a temporary password once. Paste it here and I'll run
+  the smoke test against production, then you deactivate the account.
+
+  That flow also gets step 7's first item for free: the account arrives with
+  mustChangePassword = true, so logging in exercises the forced-change gate on
+  real production rather than a fixture.
+
+  Two things to know before you do it: the password will sit in this
+  conversation, and I'll need to set a new one during the forced change. Both
+  are fine for a throwaway you deactivate afterwards — just don't reuse a
+  password you care about.
+
+  On the App Store decision — it's not a switch
+
+  Recorded as C55, but the part worth saying out loud: unlisted is a request, 
+  not a setting. Apple grants it after a normal App Review approval, so plan for
+  two rounds rather than one.
+
+  Two consequences that will bite if unanticipated:
+
+  A reviewer can't sign in. There's no self-registration by design, so you must
+  supply a demo account in App Review Information — and it should be a member 
+  with mustChangePassword = false, or the reviewer hits the forced-change gate
+  and stalls.
+
+  Minimum functionality (§4.2) is the real rejection risk. A private app for one
+  family has no broad audience. Unlisted distribution exists precisely for
+  that, so say so in the review notes rather than letting a reviewer guess.
+
+  Two rules you happen to be clear of, worth stating pre-emptively: Sign in with
+  Apple doesn't apply (no third-party login), and in-app account deletion
+  doesn't apply (no account creation — accounts are admin-issued and users are
+  deactivated, never deleted).
+
+  None of it is client code. Also needed: a privacy policy URL, nutrition labels
+  (email + user content, linked to identity, app functionality only — no
+  tracking), screenshots, and an export-compliance answer.
+
+  Step 9 stays parked
+
+  Agreed — client-v1 waits for the device run. Tagging a release that has never
+  run on real hardware would make the tag a lie.
+
+  Worth flagging from steps 1–5
+
+  Three findings that weren't style nits:
+
+  A plain VStack built every article block on open. Fine for text; for an
+  article with photos it would fire every image load at once regardless of
+  what's on screen. LazyVStack took the 120-block article from 553 rendered 
+  elements to 122, and scrolling now settles where it previously timed out. That
+  fix is only safe because ImageCache keys on the S3 key rather than the
+  rotating presigned URL — C35 paid for itself.
+
+  The month grid spoke bare numbers to VoiceOver. Swiping it gave "one, two,
+  three" with no month or weekday, since the weekday header is decorative and
+  hidden. Cells now say "Wednesday, August 26, today" while the visible text
+  stays a number.
+
+  AnnouncementEditorView was still doing its own networking inside the View —
+  the last editor without a ViewModel. Extracting it made that save path
+  testable for the first time.
+
+  I'll run the smoke test as soon as you send the password.
+
+✻ Brewed for 34m 43s

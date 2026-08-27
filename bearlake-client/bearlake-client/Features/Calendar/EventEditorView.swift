@@ -198,6 +198,12 @@ struct EventEditorView: View {
     }
 }
 
+// Previews are DEBUG-only: the `#Preview` macro's generated code compiles in
+// every configuration, and it references `PreviewAPI` / `.preview()`, which
+// live behind `#if DEBUG` in PreviewSupport.swift so no test double ever
+// reaches a shipping binary. Without this guard the Release build does not
+// compile — which is how it stayed broken until Phase 11 built it.
+#if DEBUG
 #Preview("Create") {
     EventEditorView(
         mode: .create(dateOnly: "2026-07-17"), api: PreviewAPI(), onFinished: { _ in }
@@ -217,3 +223,4 @@ struct EventEditorView: View {
         onFinished: { _ in }
     )
 }
+#endif

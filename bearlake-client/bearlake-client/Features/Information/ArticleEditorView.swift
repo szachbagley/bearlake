@@ -311,6 +311,12 @@ private struct BlockRow: View {
     }
 }
 
+// Previews are DEBUG-only: the `#Preview` macro's generated code compiles in
+// every configuration, and it references `PreviewAPI` / `.preview()`, which
+// live behind `#if DEBUG` in PreviewSupport.swift so no test double ever
+// reaches a shipping binary. Without this guard the Release build does not
+// compile — which is how it stayed broken until Phase 11 built it.
+#if DEBUG
 #Preview {
     ArticleEditorView(
         articleID: "a1", api: PreviewAPI(),
@@ -322,3 +328,4 @@ private struct BlockRow: View {
         onFinished: {}
     )
 }
+#endif
