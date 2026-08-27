@@ -894,9 +894,9 @@ The cache also survived a relaunch with the server down, which is the restore fi
 
 ---
 
-#### Phase 11 status — steps 1–5 ✅, steps 6–8 need the owner
+#### Phase 11 status — steps 1–5, 7, 8 ✅ · steps 6 and 9 need the owner
 
-**419 tests green, zero warnings.**
+**421 tests green, zero warnings. Release builds with zero errors and zero warnings** — which it did not, until this phase.
 
 ##### Step 1 — §6 checklist, read as a stranger's PR
 
@@ -951,13 +951,34 @@ The article did not. `ArticleView` used a plain `VStack`, so opening an article 
 
 Rebuilding rows on scroll-back is safe *because* `ImageCache` keys on the S3 key rather than the rotating presigned URL (C35) — already pinned by "the same key with different presigned URLs fetches once". That decision paid for itself here.
 
-##### Steps 6–8 — blocked on the owner
+##### Step 7 — production smoke test, and the two defects it found
 
-- **Step 6, physical iPhone:** needs a device. Production is up and answering correctly (401 unauthenticated, correct error shape on a bad login), and release builds already point at it.
-- **Step 7, production smoke test:** needs a production account credential, which is not derivable from anything in the repo — user passwords are bcrypt hashes in the prod database.
-- **Step 8, distribution:** the plan says explicitly to raise it rather than assume.
+Full transcript: `docs/client-production-smoke-2026-08-26.md`. Run on the **Release** build against the deployed API with a throwaway production **member**.
 
-**Step 9 (tag `client-v1`) is deliberately not done yet** — the gate requires the smoke transcript, and tagging a release that has never run on real hardware would make the tag a lie.
+Everything a member can exercise passed, including the forced password-change gate firing on production with no tab bar and no dismissal, the complete absence of admin controls, the member-variant empty-state wording, and a create → edit → delete event round trip where the creator correctly got the editor rather than the read-only detail. One event was created and deleted; nothing pre-existing in production was touched.
+
+**Both defects it found were Release-only, and no test could have caught either — the suite runs against Debug.**
+
+**1. The Release build did not compile.** Every phase to this point built Debug; the configuration that ships had never been built once. `PreviewSupport.swift` is correctly `#if DEBUG`-guarded, but the `#Preview` macro's generated code compiles in *every* configuration, so all 23 preview files failed on `PreviewAPI` / `.preview()`. Fixed by guarding the preview blocks themselves.
+
+**2. The app segfaulted on sign-out.**
+
+```
+AppComposition.init() closure #4 → CacheStore.clear()
+  → Foundation: type metadata completion function for Predicate
+    → swift_getGenericMetadata → EXC_BAD_ACCESS
+```
+
+`clear()` looped `CacheSchema.models` — `[any PersistentModel.Type]` — handing each **existential metatype** to SwiftData's generic `delete(model:)`, which forces runtime instantiation of `Predicate` metadata. Debug survives it; optimised builds do not.
+
+**The consequence was worse than the crash.** Sign-out is what removes the cached announcement and quick-tip bodies — gate codes, where the keys are hidden — from disk. A crash there left them there, defeating Phase 10 step 4 exactly when it matters. Fixed by listing the six types concretely; `CacheSchema.modelCount` is the tripwire against the two lists drifting. Re-verified on Release against production: clean sign-out, no new crash report.
+
+**Not covered:** admin CRUD and a real image upload against production, both of which need an admin credential. They are covered against the local API and by the suite, but the deployed pair has not been exercised through them from iOS.
+
+##### Steps 6 and 9 — still with the owner
+
+- **Step 6, physical iPhone:** needs a device. Production is up, and the Release build now genuinely runs against it — the simulator run above is the same binary configuration a phone would get. A hands-on **VoiceOver** pass belongs here too (see step 3).
+- **Step 9, tag `client-v1`:** deliberately waiting. The gate requires the device run, and tagging a release that has never run on real hardware would make the tag a lie.
 
 ---
 
