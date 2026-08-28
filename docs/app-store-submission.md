@@ -106,9 +106,10 @@ In the **web app**, create a user for App Review:
 - [ ] **Privacy policy URL.** The text is in `docs/privacy-policy.md`; it needs to be
       hosted at a public URL. A GitHub Pages page or a single static file on the
       existing Vercel project is enough.
-- [ ] **Screenshots.** Required for 6.9" and 6.5" iPhone. These can be taken from the
-      simulator; the four screens worth showing are Home, Calendar, an Information
-      article, and the knowledge-base list.
+- [x] **Screenshots** — done. Four at **1320×2868** (Apple's 6.9" requirement) in
+      `docs/app-store-screenshots/`: Home, Calendar, Information, and an article.
+      Captured on iPhone 17 Pro Max with realistic cabin content. Apple accepts the
+      6.9" set alone and scales it for smaller devices, so no second size is needed.
 - [ ] **Support URL.** Can be the same page as the privacy policy.
 
 ## 6. Description — draft
