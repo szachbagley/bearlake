@@ -207,9 +207,27 @@ final class CacheStore {
     /// Empties every table. The next user must not see the previous user's
     /// content, and a member must not inherit an admin's cached drafts.
     func clear() {
-        for type in CacheSchema.models {
-            deleteAll(type)
-        }
+        // Listed concretely, never by looping `CacheSchema.models`.
+        //
+        // That array is `[any PersistentModel.Type]`, and handing an
+        // *existential* metatype to SwiftData's generic `delete(model:)`
+        // forces the runtime to instantiate generic metadata for a
+        // `Predicate` it cannot see statically. Debug survives it; an
+        // optimised build segfaults inside libswiftCore — which is exactly
+        // what the Phase 11 production smoke test hit on sign-out.
+        //
+        // The consequence was worse than a crash: sign-out is what empties
+        // the family's cached gate codes and key locations, so a crash here
+        // left them on disk (Phase 10, step 4).
+        //
+        // If you add a `@Model`, add it here as well — `modelCount` below is
+        // the tripwire that fails the test if you forget.
+        try? context.delete(model: CachedAnnouncement.self)
+        try? context.delete(model: CachedEvent.self)
+        try? context.delete(model: CachedQuickTip.self)
+        try? context.delete(model: CachedCategory.self)
+        try? context.delete(model: CachedArticleSummary.self)
+        try? context.delete(model: CachedArticle.self)
         commit()
     }
 
@@ -228,7 +246,10 @@ final class CacheStore {
         (try? context.fetch(descriptor)) ?? []
     }
 
-    private func deleteAll(_ type: any PersistentModel.Type) {
+    /// Generic, not `any PersistentModel.Type`: the concrete type must stay
+    /// visible to the compiler so `delete(model:)` specialises rather than
+    /// instantiating metadata at runtime. See `clear()`.
+    private func deleteAll<T: PersistentModel>(_ type: T.Type) {
         try? context.delete(model: type)
     }
 

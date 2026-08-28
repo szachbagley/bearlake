@@ -105,6 +105,7 @@ Every open or unspecified choice, resolved. Final for v1. Referenced as **C1…C
 | C53 | `UIImage` for decoding | Allowed in **`ImageCache`** and `Image(uiImage:)` only. Not a second UIKit exception in the C37 sense. | iOS 17 has no way to build a SwiftUI `Image` from bytes — `Image(uiImage:)` is SwiftUI's own initializer and `UIImage` is the data type it takes. No view controllers, no `UIViewRepresentable`, nothing that renders. Recorded so it is a decision rather than undocumented drift from "no UIKit". |
 | C52 | UI automation | **`XcodeBuildMCP` 2.7.0**, project-scoped and version-pinned in `.mcp.json`, with `ui-automation` enabled via `.xcodebuildmcp/config.yaml`. Semantic `snapshot_ui` + `tap`, not coordinates. | Added in Phase 4 after three phases of accumulating manual tap checks. **Closed 12 of the 13 outstanding manual checks in one pass**, including the row swipe actions and pagination that `simctl` cannot reach at all. Use it for every gate from Phase 5 on; the `simctl` fallback stays for build/install/screenshot. |
 | C54 | `UIPasteboard` for "Copy My Changes" | **Allowed**, in `ArticleEditorView` only, and written with `setItems(_:options:)` using `.localOnly: true` and a 10-minute expiry — never `.string`. | iOS 17 has no programmatic SwiftUI clipboard write: `.copyable` needs focus and a selection, `ShareLink` is a share sheet and cannot live inside an `.alert`, `PasteButton` only reads. The interop cost is nil — one line, no wrapper, no lifecycle. The **real** reason to scope it is privacy, not style: articles document gate codes and key locations, and `UIPasteboard.general` is readable by every other app and syncs to the admin's Mac and iPad via Universal Clipboard. `localOnly` plus an expiry keeps a rescued draft on one device and clears it unattended. |
+| C55 | Distribution | **Unlisted on the App Store** — not discoverable by search, installable by anyone with the link. | Owner's decision, Phase 11 step 8. Beats TestFlight (90-day build expiry, re-upload a few times a year) and cabled installs (every phone at the Mac) for a family spread across households. The cost is that it is a real App Store submission: full App Review, and unlisted status is itself a request Apple has to approve. See §9. |
 
 ---
 
@@ -893,6 +894,94 @@ The cache also survived a relaunch with the server down, which is the restore fi
 
 ---
 
+#### Phase 11 status — steps 1–5, 7, 8 ✅ · steps 6 and 9 need the owner
+
+**421 tests green, zero warnings. Release builds with zero errors and zero warnings** — which it did not, until this phase.
+
+##### Step 1 — §6 checklist, read as a stranger's PR
+
+| Item | Result |
+|---|---|
+| ViewModels do not import SwiftUI | ✅ |
+| No `URLSession` outside `Services/` | ✅ (the one hit is a comment) |
+| No force-unwrap, `try!`, or `fatalError` | ✅ |
+| Data loaded in `.task`, never `.onAppear` | ✅ zero `.onAppear` in the app |
+| Every View file has a `#Preview` | ✅ |
+| Every destructive action confirms | ✅ all five delete paths |
+| No invented screens | ✅ inventory matches the spec |
+| **Views are pure** | ❌ → fixed |
+| **No `TimeInterval` date math** | ❌ → fixed |
+
+`AnnouncementEditorView` was the last editor still doing its own networking, save state, validation, and error handling inside a `View`. Extracted to `AnnouncementEditorViewModel`, which made that save path reachable from a test for the first time. `PreviewSupport` computed "a month ago" as `- 86_400 * 30`; preview data cannot produce a user-visible bug, but a wrong example gets copied somewhere it matters.
+
+##### Step 2 — security sweep
+
+Recorded in full in §8. The two worth repeating: **`UserDefaults` has zero references** in the app target, and there are **zero logging calls of any kind**, so "no log carries a gate code" holds in the strongest available form. `StrictBodySweepTests` now pins the exact key set of every write payload against the server's `z.strictObject` schemas.
+
+§8 also records something no checklist line covered: Phase 10 moved gate codes and key locations from memory onto disk. Protected by container encryption when the device has a passcode, emptied on sign-out, unprotected on a device without one.
+
+##### Step 3 — accessibility
+
+Dark mode and Dynamic Type through XXL verified on every screen. Three fixes:
+
+- **The month grid spoke bare numbers.** On screen that is right — the header supplies the month — but VoiceOver reads cells in isolation, so swiping the grid gave "one, two, three" with no month or weekday, and the weekday header is decorative and hidden. Cells now say "Wednesday, August 26, today" while the visible text stays a number. Formatting went into `CabinDate.spokenDayLabel` rather than the view (C27), tested across five timezones.
+- **Past XXL the grid collapsed** — seven columns of digits collided and the month truncated to "A…". Grid and header now cap at XXL, as the system Calendar's does, while everything anyone *reads* keeps scaling to the largest accessibility size.
+- The splash icon is decorative and now hidden; the "Photo unavailable" placeholder is announced once rather than twice.
+
+**Not done: driving VoiceOver itself.** The simulator accepts the `defaults write` but the accessibility daemon does not act on it without a Settings toggle, and forcing it risks wedging the automation. What was verified is the accessibility tree — the exact data VoiceOver consumes — on every control of every screen. A hands-on VoiceOver pass belongs with the device run in step 6.
+
+##### Step 4 — date audit: zero violations
+
+`Calendar.current` and `TimeZone.current` appear nowhere outside `CabinDate`. `ISO8601DateFormatter` appears only in `APICoding`, with both the fractional-seconds option and a fallback (C23). Every `calendar.date(from:)` builds from `CabinDate`'s **text** parser, never an ISO read of a bare date (C22).
+
+One consolidation: three sites had written out the same `components → date → format` dance, so it became `CabinDate.dateLabel(forDateOnly:)`.
+
+##### Step 5 — performance, and the one real finding
+
+Exercised with **62 events in one month** and a **120-block article**.
+
+The calendar held — six month steps under load stayed responsive, the buffer month loaded, and the month-change selection rule still landed on the first of the month.
+
+The article did not. `ArticleView` used a plain `VStack`, so opening an article built **every** block up front. For a long article that is wasteful; for an article with several photos it would fire every image load at once regardless of what is on screen. `LazyVStack` fixed it:
+
+| | before | after |
+|---|---|---|
+| rendered elements, 120-block article | 553 | **122** |
+| scroll settles | ✗ timed out | ✅ |
+
+Rebuilding rows on scroll-back is safe *because* `ImageCache` keys on the S3 key rather than the rotating presigned URL (C35) — already pinned by "the same key with different presigned URLs fetches once". That decision paid for itself here.
+
+##### Step 7 — production smoke test, and the two defects it found
+
+Full transcript: `docs/client-production-smoke-2026-08-26.md`. Run on the **Release** build against the deployed API with a throwaway production **member**.
+
+Everything a member can exercise passed, including the forced password-change gate firing on production with no tab bar and no dismissal, the complete absence of admin controls, the member-variant empty-state wording, and a create → edit → delete event round trip where the creator correctly got the editor rather than the read-only detail. One event was created and deleted; nothing pre-existing in production was touched.
+
+**Both defects it found were Release-only, and no test could have caught either — the suite runs against Debug.**
+
+**1. The Release build did not compile.** Every phase to this point built Debug; the configuration that ships had never been built once. `PreviewSupport.swift` is correctly `#if DEBUG`-guarded, but the `#Preview` macro's generated code compiles in *every* configuration, so all 23 preview files failed on `PreviewAPI` / `.preview()`. Fixed by guarding the preview blocks themselves.
+
+**2. The app segfaulted on sign-out.**
+
+```
+AppComposition.init() closure #4 → CacheStore.clear()
+  → Foundation: type metadata completion function for Predicate
+    → swift_getGenericMetadata → EXC_BAD_ACCESS
+```
+
+`clear()` looped `CacheSchema.models` — `[any PersistentModel.Type]` — handing each **existential metatype** to SwiftData's generic `delete(model:)`, which forces runtime instantiation of `Predicate` metadata. Debug survives it; optimised builds do not.
+
+**The consequence was worse than the crash.** Sign-out is what removes the cached announcement and quick-tip bodies — gate codes, where the keys are hidden — from disk. A crash there left them there, defeating Phase 10 step 4 exactly when it matters. Fixed by listing the six types concretely; `CacheSchema.modelCount` is the tripwire against the two lists drifting. Re-verified on Release against production: clean sign-out, no new crash report.
+
+**Not covered:** admin CRUD and a real image upload against production, both of which need an admin credential. They are covered against the local API and by the suite, but the deployed pair has not been exercised through them from iOS.
+
+##### Steps 6 and 9 — still with the owner
+
+- **Step 6, physical iPhone:** needs a device. Production is up, and the Release build now genuinely runs against it — the simulator run above is the same binary configuration a phone would get. A hands-on **VoiceOver** pass belongs here too (see step 3).
+- **Step 9, tag `client-v1`:** deliberately waiting. The gate requires the device run, and tagging a release that has never run on real hardware would make the tag a lie.
+
+---
+
 ## 6. Per-phase review checklist
 
 Applied at every phase gate (step 5 of §4):
@@ -1050,3 +1139,57 @@ cd ../bearlake-server && npm run dev
 - **`bearlake-web/` is the reference implementation, not a thing to copy blindly.** Where this plan deliberately diverges — HEIC re-encoding (C41), native `.onMove` reordering (Phase 9), no cabin-time echo (C28) — the divergence is recorded with its reason.
 - **Three contracts must stay identical across both clients** or they will silently disagree: the block schema (C30/C31), date-only all-day handling with inclusive ends (C22/C25), and `updatedAt` optimistic locking (C39).
 - **`CLAUDE.md` has been amended to match this plan** (landed with it, ahead of Phase 0). Swift files *do* auto-add (C5), the scheme is `bearlake-client` not `BearLake` (C10), and the Swift date, image-cache, and `WKWebView` rules from §2 are now in the always-loaded guidance rather than only here. Only the simulator device name is still a placeholder — Phase 0 step 3 fills it in. **If this plan and `CLAUDE.md` ever disagree again, this plan is the newer document and wins; fix `CLAUDE.md` in the same task rather than leaving both in circulation.**
+
+---
+
+## 8. Security sweep — Phase 11, step 2
+
+Each line verified against the tree by grep and/or a test, on the date of the Phase 11 branch.
+
+| Requirement | How it was checked | Result |
+|---|---|---|
+| Refresh token **only** in the Keychain | `TokenStore.store` is the sole writer, and it calls `secureStore.save` → `KeychainStore` | ✅ |
+| Nothing sensitive in `UserDefaults` | `grep -r UserDefaults` over the app target | ✅ **zero references** — the identifier appears once, in a comment explaining why it is not used |
+| Access token never persisted | `TokenStore.accessToken` is a plain in-memory `actor` property; no writer touches disk | ✅ |
+| No log carries an announcement/quick-tip body, password, or token | `grep -rE "\bprint\(\|NSLog\|os_log\|Logger(\|debugPrint\|dump("` | ✅ **zero logging calls of any kind** in the app target, so the stronger property holds: nothing is logged at all |
+| No force-unwrap or `try!` in non-test code | grep for `try!`, `fatalError(`, and `!` in postfix position | ✅ none |
+| Write payloads match the documented field set (C15) | `StrictBodySweepTests` pins the exact encoded key set for **every** create/update request against the server's `z.strictObject` schemas | ✅ 9 tests |
+| No `url` in any write payload (C34) | The `image` branch of `Block.encode` destructures `url` as `_` and has no line that emits it — unrepresentable rather than merely absent. Asserted for a block that *was* read with a live presigned URL | ✅ |
+| Every destructive action confirms first | All five `api.delete*` paths traced to a `confirmationDialog` | ✅ announcements, articles, quick tips, categories, events |
+
+### One thing Phase 10 changed, recorded rather than waved past
+
+Before the offline cache, announcement and quick-tip bodies — which hold **gate codes and where the keys are hidden** — existed only in memory. They are now written to disk in the SwiftData store.
+
+This is not a defect, and it is the unavoidable cost of offline viewing, but it is a genuine change in exposure and belongs on the record:
+
+- iOS encrypts the app container at rest under the default protection class whenever the device has a passcode, which is the realistic protection here.
+- The store holds only what that user already downloaded, and it is emptied on sign-out (Phase 10, step 4) so a second family member cannot read the first one's content.
+- **A device with no passcode gets no encryption at rest.** That is the one configuration where this matters, and it is outside the app's control.
+
+If stronger protection is ever wanted, the lever is setting `NSFileProtectionComplete` on the store file — which would make the cache unreadable while the device is locked, and therefore break any future background refresh. Not worth it today; worth knowing the trade before someone asks.
+
+
+---
+
+## 9. Unlisted App Store distribution — what it actually requires (C55)
+
+Recorded because "put it on the App Store, unlisted" sounds like a switch and is not one. None of this is client code; all of it is App Store Connect work that has to happen before the family can install anything.
+
+**Unlisted is a request, not a setting.** Apple grants unlisted distribution on application, after the app has been approved. The usual order is: submit normally → get approved → request unlisted → Apple reissues the link. Plan for that being two rounds rather than one.
+
+**App Review will need to sign in.** There is no self-registration by design (accounts are admin-issued), so a reviewer cannot get in on their own. A demo account must go in App Review Information, and it needs to be a **member**, not an admin — a reviewer poking at admin-only destructive controls on the family's real data is not a risk worth taking. Give it `mustChangePassword = false` so the reviewer does not hit the forced-change gate and stall.
+
+**Things this app happens to be clear of:**
+
+- *Sign in with Apple* (§4.8) applies to apps offering third-party login. This one offers none.
+- *In-app account deletion* (§5.1.1(v)) applies to apps that support account **creation**. This one does not — accounts are issued by an admin and users are deactivated, never deleted. Worth stating plainly in the review notes rather than waiting to be asked.
+
+**Things that will need answering:**
+
+- A **privacy policy URL** is mandatory, even unlisted.
+- **Privacy nutrition labels**: the app collects an email address and user content, linked to identity, used only for app functionality — no tracking, no third-party analytics, no ads. That is an easy set of answers, but it has to be filled in.
+- **Minimum functionality (§4.2)** is the realistic rejection risk: a private app for one family has no broad audience. Unlisted distribution exists precisely for this, so say so in the review notes rather than leaving the reviewer to guess.
+- Screenshots, description, age rating, and an export-compliance answer (standard HTTPS only, no custom cryptography).
+
+**Not a client-code task.** Nothing above changes the app. It is worth doing before the `client-v1` tag only insofar as a rejection might force a build change; nothing currently known suggests one.

@@ -283,3 +283,84 @@ struct DayMembershipTests {
         #expect(dates.spansMultipleDays(.timed(start: start, end: end)) == false)
     }
 }
+
+// MARK: - Spoken day labels (Phase 11, step 3)
+
+struct SpokenDayLabelTests {
+    private func denver() throws -> CabinDate {
+        CabinDate(timeZone: try #require(TimeZone(identifier: "America/Denver")),
+                  locale: Locale(identifier: "en_US"))
+    }
+
+    /// The grid's visible cells are bare numbers, which is right on screen.
+    /// VoiceOver reads them in isolation, so the label carries the weekday
+    /// and month the header supplies visually.
+    @Test("a grid day speaks its weekday and month, not just a number")
+    func speaksFullDate() throws {
+        let label = try denver().spokenDayLabel(forDateOnly: "2026-08-01")
+        #expect(label.contains("Saturday"), "2026-08-01 is a Saturday")
+        #expect(label.contains("August"))
+        #expect(label.contains("1"))
+    }
+
+    /// C22, the bug this project is most prone to. A date-only string must
+    /// never be read as UTC midnight — that renders a day early for every
+    /// negative-offset viewer, Utah included.
+    @Test("the spoken date does not shift by timezone", arguments: [
+        "America/Denver", "America/New_York", "UTC", "Asia/Tokyo", "Pacific/Kiritimati",
+    ])
+    func doesNotShift(zone: String) throws {
+        let dates = CabinDate(
+            timeZone: try #require(TimeZone(identifier: zone)),
+            locale: Locale(identifier: "en_US")
+        )
+        let label = dates.spokenDayLabel(forDateOnly: "2026-08-01")
+        #expect(label.contains("Saturday"), "\(zone) must not shift the weekday")
+        #expect(label.contains("August"), "\(zone) must not shift the month")
+    }
+
+    /// A malformed value must be visible, not silently turned into some
+    /// other real date.
+    @Test("a malformed date-only string falls back to itself")
+    func malformedFallsBack() throws {
+        let dates = try denver()
+        #expect(dates.spokenDayLabel(forDateOnly: "2026-02-30") == "2026-02-30")
+        #expect(dates.spokenDayLabel(forDateOnly: "nonsense") == "nonsense")
+    }
+
+    /// The turn of the year is where an off-by-one is most visible.
+    @Test("New Year's Day speaks correctly")
+    func newYear() throws {
+        let label = try denver().spokenDayLabel(forDateOnly: "2027-01-01")
+        #expect(label.contains("January"))
+        #expect(label.contains("Friday"), "2027-01-01 is a Friday")
+    }
+}
+
+// MARK: - dateLabel(forDateOnly:) (Phase 11, step 4)
+
+struct DateOnlyLabelTests {
+    /// The consolidation of three call sites. The property that matters is
+    /// the same one as everywhere else in this file: a date-only string is
+    /// text, and formatting it must not move it (C22).
+    @Test("a date-only label does not shift by timezone", arguments: [
+        "America/Denver", "America/New_York", "UTC", "Asia/Tokyo", "Pacific/Kiritimati",
+    ])
+    func labelDoesNotShift(zone: String) throws {
+        let dates = CabinDate(
+            timeZone: try #require(TimeZone(identifier: zone)),
+            locale: Locale(identifier: "en_US")
+        )
+        let label = dates.dateLabel(forDateOnly: "2026-08-26")
+        #expect(label.contains("26"), "\(zone): the day must not move")
+        #expect(label.contains("Aug"), "\(zone): the month must not move")
+        #expect(label.contains("2026"))
+    }
+
+    @Test("a malformed date-only string falls back to itself rather than a wrong date")
+    func malformedFallsBack() throws {
+        let dates = CabinDate(timeZone: try #require(TimeZone(identifier: "America/Denver")))
+        #expect(dates.dateLabel(forDateOnly: "2026-13-01") == "2026-13-01")
+        #expect(dates.dateLabel(forDateOnly: "") == "")
+    }
+}

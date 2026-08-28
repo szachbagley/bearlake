@@ -235,3 +235,78 @@ struct AnnouncementValidationTests {
         #expect(AnnouncementsViewModel.validationProblem(body: "Marina code is 0000") == nil)
     }
 }
+
+// MARK: - The editor (Phase 11, step 1)
+
+/// These exist because the editor's save path used to live inside a `View`,
+/// where none of it could be reached from a test.
+@MainActor
+struct AnnouncementEditorViewModelTests {
+    @Test("creating posts the trimmed body")
+    func createTrims() async throws {
+        let api = FakeAPI()
+        let model = AnnouncementEditorViewModel(api: api, existing: nil)
+        model.setText("  Gate code is 4417.  ")
+
+        let saved = try #require(await model.save())
+        #expect(saved.body == "Gate code is 4417.")
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test("editing updates the existing announcement")
+    func editUpdates() async throws {
+        let api = FakeAPI()
+        let existing = Announcement.fixture(id: "a1", body: "Original")
+        await api.seed(announcements: [existing])
+        let model = AnnouncementEditorViewModel(api: api, existing: existing)
+        #expect(model.isEditing)
+        #expect(model.hasChanges == false, "untouched, so nothing to discard")
+
+        model.setText("Corrected")
+        #expect(model.hasChanges)
+
+        let saved = try #require(await model.save())
+        #expect(saved.body == "Corrected")
+    }
+
+    @Test("an empty or over-long body cannot be saved")
+    func validationBlocksSave() {
+        let api = FakeAPI()
+        let model = AnnouncementEditorViewModel(api: api, existing: nil)
+        #expect(model.canSave == false, "empty")
+
+        model.setText("   ")
+        #expect(model.canSave == false, "whitespace only")
+
+        model.setText(String(repeating: "x", count: Limits.announcementBodyMax + 1))
+        #expect(model.canSave == false)
+        #expect(model.isOverLength)
+
+        model.setText("Fine.")
+        #expect(model.canSave)
+    }
+
+    @Test("a failed save surfaces the server's message and returns nil")
+    func failedSaveSurfaces() async throws {
+        let api = FakeAPI()
+        await api.setNextError(APIError(
+            status: 400, code: "VALIDATION_ERROR", message: "That announcement is too long."
+        ))
+        let model = AnnouncementEditorViewModel(api: api, existing: nil)
+        model.setText("Something")
+
+        #expect(await model.save() == nil)
+        #expect(model.errorMessage == "That announcement is too long.")
+        #expect(model.isSaving == false, "the spinner stops even on failure")
+    }
+
+    /// Formatting moved out of the view body with the rest of the logic.
+    @Test("the posted label is present only when editing")
+    func postedLabelOnlyWhenEditing() {
+        let api = FakeAPI()
+        #expect(AnnouncementEditorViewModel(api: api, existing: nil).postedLabel == nil)
+        #expect(
+            AnnouncementEditorViewModel(api: api, existing: .fixture()).postedLabel != nil
+        )
+    }
+}

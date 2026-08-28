@@ -62,6 +62,9 @@ struct CachedAsyncImage: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            // children: .ignore so the icon and the caption are announced
+            // once, as one element, rather than as two.
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel("Photo unavailable")
     }
 
@@ -81,7 +84,14 @@ struct CachedAsyncImage: View {
     }
 }
 
+// Previews are DEBUG-only: the `#Preview` macro's generated code compiles in
+// every configuration, and it references `PreviewAPI` / `.preview()`, which
+// live behind `#if DEBUG` in PreviewSupport.swift so no test double ever
+// reaches a shipping binary. Without this guard the Release build does not
+// compile — which is how it stayed broken until Phase 11 built it.
+#if DEBUG
 #Preview {
     CachedAsyncImage(key: "articles/x/y", url: nil, cache: ImageCache())
         .padding()
 }
+#endif

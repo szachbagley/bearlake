@@ -242,10 +242,7 @@ final class EventEditorViewModel {
     // `Calendar`.
 
     func dayLabel(_ dateOnly: String) -> String {
-        guard let components = dates.components(fromDateOnly: dateOnly),
-              let date = dates.calendar.date(from: components)
-        else { return dateOnly }
-        return dates.dateLabel(from: date)
+        dates.dateLabel(forDateOnly: dateOnly)
     }
 
     func timeLabel(_ time: Date) -> String {

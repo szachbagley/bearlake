@@ -101,9 +101,12 @@ struct RootView: View {
 struct SplashView: View {
     var body: some View {
         VStack(spacing: 16) {
+            // Decorative: "Bear Lake" underneath says the same thing, and
+            // VoiceOver announcing a symbol name adds nothing.
             Image(systemName: "house.and.flag")
                 .font(.largeTitle)
                 .foregroundStyle(.tint)
+                .accessibilityHidden(true)
             Text("Bear Lake").font(.title)
             ProgressView()
                 .accessibilityLabel("Signing in")
@@ -112,6 +115,13 @@ struct SplashView: View {
     }
 }
 
+// Previews are DEBUG-only: the `#Preview` macro's generated code compiles in
+// every configuration, and it references `PreviewAPI` / `.preview()`, which
+// live behind `#if DEBUG` in PreviewSupport.swift so no test double ever
+// reaches a shipping binary. Without this guard the Release build does not
+// compile — which is how it stayed broken until Phase 11 built it.
+#if DEBUG
 #Preview("Splash") {
     SplashView()
 }
+#endif

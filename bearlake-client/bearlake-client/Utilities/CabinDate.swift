@@ -132,6 +132,45 @@ struct CabinDate: Sendable {
         formatter(dateStyle: .medium, timeStyle: .none)
     }
 
+    /// A date-only string as a display label: "Aug 26, 2026".
+    ///
+    /// The `components → date → format` dance was written out at three call
+    /// sites. It is short, which is exactly why it spreads — and C27 says
+    /// this conversion lives in one place.
+    func dateLabel(forDateOnly value: String) -> String {
+        guard let components = components(fromDateOnly: value),
+              let date = calendar.date(from: components)
+        else { return value }
+        return dateLabel(from: date)
+    }
+
+    /// A full spoken date for one grid cell: "Saturday, August 1".
+    ///
+    /// The month grid's visible cells are bare numbers, which is right on
+    /// screen — the month header supplies the rest — but leaves VoiceOver
+    /// announcing "one, two, three" with no month, weekday, or context. The
+    /// weekday header row is decorative and hidden, so there is no other
+    /// source. Built here rather than in the view, like every other piece of
+    /// date formatting (C27).
+    ///
+    /// Falls back to the raw `YYYY-MM-DD` rather than inventing a date, so a
+    /// malformed value is visible instead of silently wrong.
+    func spokenDayLabel(forDateOnly value: String) -> String {
+        guard let components = components(fromDateOnly: value),
+              let date = calendar.date(from: components)
+        else { return value }
+        return spokenDayFormatter.string(from: date)
+    }
+
+    private var spokenDayFormatter: DateFormatter {
+        let formatter = self.formatter(dateStyle: .none, timeStyle: .none)
+        // EEEE = full weekday, MMMM = full month. setLocalizedDateFormat
+        // keeps the component *order* correct for the locale rather than
+        // hardcoding an English arrangement.
+        formatter.setLocalizedDateFormatFromTemplate("EEEEMMMMd")
+        return formatter
+    }
+
     private var timeFormatter: DateFormatter {
         formatter(dateStyle: .none, timeStyle: .short)
     }

@@ -226,3 +226,42 @@ struct CacheStoreClearTests {
         #expect(store.article(id: "ar1") == nil)
     }
 }
+
+
+// MARK: - The Release-only sign-out crash (Phase 11, step 7)
+
+@MainActor
+struct ClearIsExhaustiveTests {
+    /// `clear()` lists its model types concretely because looping
+    /// `CacheSchema.models` hands SwiftData an existential metatype, which
+    /// segfaults in an optimised build. Two lists that must agree is exactly
+    /// the shape that drifts, so this is the tripwire: add a `@Model` without
+    /// adding it to `clear()` and this fails.
+    @Test("the schema and clear() cover the same number of models")
+    func clearCoversEverySchemaModel() {
+        #expect(
+            CacheSchema.models.count == CacheSchema.modelCount,
+            "a @Model was added — add it to CacheStore.clear() and bump modelCount"
+        )
+    }
+
+    /// The behavioural half: whatever the counts say, a full store must end
+    /// up genuinely empty. Sign-out is what removes the family's cached gate
+    /// codes and key locations from disk, so a partial clear is a privacy
+    /// failure and not merely a bug.
+    @Test("clear empties a fully populated store")
+    func clearEmptiesFullyPopulatedStore() throws {
+        let store = try makeStore()
+        store.save(announcements: [.fixture(id: "a1")], replacingAll: true)
+        store.save(events: [.fixture(id: "e1")], window: nil)
+        store.save(quickTips: [.fixture(id: "t1")])
+        store.save(categories: [.fixture(id: "c1")])
+        store.save(articleSummaries: [.fixture(id: "s1", categoryId: "c1")], categoryID: "c1")
+        store.save(article: .fixture(id: "ar1"))
+        #expect(store.isEmpty == false)
+
+        store.clear()
+
+        #expect(store.isEmpty)
+    }
+}

@@ -47,7 +47,8 @@ struct CalendarMonthView: View {
                     selectedDay: model.selectedDay,
                     today: model.todayDateOnly,
                     hasEvents: model.hasEvents(on:),
-                    onSelect: model.selectDay
+                    onSelect: model.selectDay,
+                    dates: model.dates
                 )
                 .padding(.horizontal, 8)
 
@@ -174,11 +175,23 @@ struct CalendarMonthView: View {
         }
         .padding(.horizontal)
         .padding(.bottom, 4)
+        // Capped with the grid it labels: past XXL the year picker's
+        // fixedSize() squeezed the month name until it truncated to "A…",
+        // which is useless on a control whose whole job is saying which
+        // month you are looking at.
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
     }
 }
 
+// Previews are DEBUG-only: the `#Preview` macro's generated code compiles in
+// every configuration, and it references `PreviewAPI` / `.preview()`, which
+// live behind `#if DEBUG` in PreviewSupport.swift so no test double ever
+// reaches a shipping binary. Without this guard the Release build does not
+// compile — which is how it stayed broken until Phase 11 built it.
+#if DEBUG
 #Preview {
     NavigationStack {
         CalendarMonthView(auth: .preview(), api: PreviewAPI(), cache: nil)
     }
 }
+#endif

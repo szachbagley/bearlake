@@ -13,6 +13,9 @@ struct MonthGrid: View {
     let today: String
     let hasEvents: (String) -> Bool
     let onSelect: @MainActor (String) -> Void
+    /// Injected, never `CabinDate()` inline — a test that cannot pin the
+    /// zone cannot prove anything (C26).
+    let dates: CabinDate
 
     /// Sunday-start, matching `CabinDate`'s `firstWeekday = 1`.
     private let weekdaySymbols = ["S", "M", "T", "W", "T", "F", "S"]
@@ -38,12 +41,20 @@ struct MonthGrid: View {
                         day: day,
                         isSelected: day.dateOnly == selectedDay,
                         isToday: day.dateOnly == today,
-                        hasEvents: hasEvents(day.dateOnly)
+                        hasEvents: hasEvents(day.dateOnly),
+                        dates: dates
                     )
                     .onTapGesture { onSelect(day.dateOnly) }
                 }
             }
         }
+        // Seven columns of digits in a phone's width have a hard ceiling.
+        // Past XXL the cells collide and the numbers run together — worse
+        // than not scaling at all — so the grid caps here, the way the system
+        // Calendar's does. Everything anyone actually *reads* (the day
+        // detail, event titles, announcements, articles) keeps scaling to the
+        // largest accessibility size.
+        .dynamicTypeSize(...DynamicTypeSize.xxLarge)
     }
 }
 
@@ -52,6 +63,7 @@ private struct DayCell: View {
     let isSelected: Bool
     let isToday: Bool
     let hasEvents: Bool
+    let dates: CabinDate
 
     /// The cell grows with Dynamic Type. At a fixed 30pt a two-digit day
     /// truncated to "…" at accessibility sizes, which makes the grid
@@ -109,11 +121,9 @@ private struct DayCell: View {
     /// Spoken as a real date rather than a bare number, since "17" alone
     /// means nothing out of context.
     private var accessibilityLabel: String {
-        var label = day.dateOnly
-        if let parts = day.dateOnly.split(separator: "-").last, let number = Int(parts) {
-            label = "\(number)"
-        }
-        var traits: [String] = [label]
+        // The full date, not the bare number: on screen the month header
+        // supplies the context, but VoiceOver reads cells in isolation.
+        var traits: [String] = [dates.spokenDayLabel(forDateOnly: day.dateOnly)]
         if isToday { traits.append("today") }
         if hasEvents { traits.append("has events") }
         if day.isInDisplayedMonth == false { traits.append("outside this month") }
@@ -121,14 +131,22 @@ private struct DayCell: View {
     }
 }
 
+// Previews are DEBUG-only: the `#Preview` macro's generated code compiles in
+// every configuration, and it references `PreviewAPI` / `.preview()`, which
+// live behind `#if DEBUG` in PreviewSupport.swift so no test double ever
+// reaches a shipping binary. Without this guard the Release build does not
+// compile — which is how it stayed broken until Phase 11 built it.
+#if DEBUG
 #Preview {
-    MonthGrid(
-        days: CabinDate(timeZone: TimeZone(identifier: "America/Denver") ?? .current)
-            .monthGrid(year: 2026, month: 7),
+    let dates = CabinDate(timeZone: TimeZone(identifier: "America/Denver") ?? .current)
+    return MonthGrid(
+        days: dates.monthGrid(year: 2026, month: 7),
         selectedDay: "2026-07-17",
         today: "2026-07-17",
         hasEvents: { ["2026-07-16", "2026-07-17", "2026-07-18"].contains($0) },
-        onSelect: { _ in }
+        onSelect: { _ in },
+        dates: dates
     )
     .padding()
 }
+#endif

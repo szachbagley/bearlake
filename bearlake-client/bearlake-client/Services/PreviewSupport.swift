@@ -16,6 +16,13 @@ import Foundation
 
 private let previewDate = Date(timeIntervalSince1970: 1_785_585_600)  // 2026-08-01
 
+/// A month before `previewDate`, via `DateComponents` rather than
+/// `- 86_400 * 30` (C29). Preview data cannot produce a user-visible bug, but
+/// a wrong example in the codebase is the kind of thing that gets copied into
+/// somewhere it matters.
+private let previewDateLastMonth = Calendar(identifier: .gregorian)
+    .date(byAdding: .month, value: -1, to: previewDate) ?? previewDate
+
 extension PublicUser {
     static let previewAdmin = PublicUser(
         id: "preview-admin", displayName: "Zach", email: "zach@example.com",
@@ -81,7 +88,7 @@ struct PreviewAPI: BearLakeAPI {
                 Announcement(
                     id: "2",
                     body: "A family of foxes has been living at the bottom of the hill.",
-                    postedAt: previewDate.addingTimeInterval(-86_400 * 30),
+                    postedAt: previewDateLastMonth,
                     createdBy: "preview-admin",
                     createdAt: previewDate, updatedAt: previewDate
                 ),
