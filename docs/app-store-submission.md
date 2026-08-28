@@ -18,6 +18,7 @@ setting you flip beforehand.
 | Bundle ID | `hansen.bearlake-client` |
 | Version | 1.0 |
 | Build | 1 |
+| Signing | Automatic, team `JK7P9CS69J` |
 | Minimum iOS | 17.0 |
 | Category | Primary: **Lifestyle**. Secondary: Productivity |
 | Price | Free |
@@ -93,10 +94,15 @@ In the **web app**, create a user for App Review:
 
 ## 5. Still needed — not in the repo
 
-- [ ] **App icon.** `Assets.xcassets/AppIcon.appiconset` currently contains only
-      `Contents.json` — there is no image. A 1024×1024 PNG, no transparency, no
-      rounded corners (Apple applies the mask). Dropping that one file into Xcode
-      generates the rest. **A missing icon is an automatic rejection.**
+- [x] **App icon** — done. `blicon.png`, 1024×1024, no alpha. Meets the spec and
+      stays legible when rendered at true home-screen size (180 px), which thin-line
+      artwork often does not.
+
+      One thing to look at before submitting, not a rejection risk: iOS masks icons
+      to a rounded square, so the **bottom-right end of the diagonal will be clipped**
+      — the artwork runs to the canvas edge there. If that bothers you, inset the
+      artwork by roughly 10% and re-export. The dark and tinted appearance slots in
+      `Contents.json` are empty, which is fine — iOS derives them.
 - [ ] **Privacy policy URL.** The text is in `docs/privacy-policy.md`; it needs to be
       hosted at a public URL. A GitHub Pages page or a single static file on the
       existing Vercel project is enough.
