@@ -559,24 +559,42 @@ SwiftData caches server responses for offline **viewing**. The server is the sou
 ### 7.5 Structure
 
 ```
-bearlake-client/BearLake/
-  App/            — @main App struct, root tab view
+bearlake-client/bearlake-client/     — the synchronized group; everything here compiles
+  App/            — @main App struct, root tab view, settings sheet
   Features/
-    Home/         — HomeView, HomeViewModel
-    Calendar/     — CalendarMonthView, DayDetailView,
+    Home/         — HomeView, AllAnnouncementsView, announcement editor + ViewModels
+    Calendar/     — CalendarMonthView, MonthGrid, DayDetailView,
                     EventEditorView, EventDetailView + ViewModels
     Information/  — InformationView, CategoryView, ArticleView,
-                    ArticleEditorView, block views + ViewModels
-    Auth/         — LoginView, AuthViewModel
-  Models/         — SwiftData @Model types, API DTOs
-  Services/       — APIClient, AuthService, KeychainStore
-  Utilities/      — date helpers, formatters
-  Tests/
+                    ArticleEditorView, Blocks/ + ViewModels
+    Auth/         — LoginView, ChangePasswordView, AuthViewModel
+    Shared/       — OfflineBanner
+  Models/         — API DTOs, Block enum, Limits, Cache/ (SwiftData @Model types)
+  Services/       — BearLakeAPI protocol, APIClient, TokenStore, KeychainStore,
+                    ImageCache, ImageUpload, PreviewSupport
+  Utilities/      — CabinDate (all date logic), YouTube, AppConfig
+bearlake-client/bearlake-clientTests/ — Swift Testing target (separate target)
 ```
+
+The folder is `bearlake-client/bearlake-client/`, not `BearLake/`. Renaming it would
+break the synchronized group's path for no benefit.
 
 ### 7.6 Xcode project management
 
-The project was initialized by Xcode, so `project.pbxproj` is authoritative and hand-managed. New Swift files do not auto-add to the target — they must be added in Xcode. Do not edit `project.pbxproj` directly.
+**Corrected in Phase 0 — this section previously said the opposite.**
+
+The app target uses a `PBXFileSystemSynchronizedRootGroup` over the inner
+`bearlake-client/bearlake-client/` folder, so **any `.swift` file created anywhere
+beneath it is compiled automatically**. There is no Xcode GUI step for adding a file;
+create them freely from the command line.
+
+The evidence is that the `PBXSourcesBuildPhase` file list is empty and no Swift file is
+referenced individually, yet the target builds.
+
+`project.pbxproj` is therefore **generated rather than curated**. Never edit it directly:
+hand edits are both unnecessary and likely to be clobbered. The two things it cannot do
+for you are creating a **new target** and changing **build settings** — both are Xcode GUI
+operations. Adding the test target in Phase 0 was the one such step in the build.
 
 ---
 
