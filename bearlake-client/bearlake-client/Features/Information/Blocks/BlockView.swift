@@ -36,6 +36,14 @@ struct BlockView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    // One element per item, labelled with the text alone.
+                    // Hiding just the glyph is not enough — it stays in the
+                    // tree as a sibling, and VoiceOver reads "bullet, life
+                    // jackets, bullet, radio", which is noise for exactly the
+                    // people who need the article to be clear. Collapsing the
+                    // row and supplying the label explicitly is unambiguous.
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(item)
                 }
             }
 
