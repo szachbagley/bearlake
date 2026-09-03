@@ -106,6 +106,7 @@ Every open or unspecified choice, resolved. Final for v1. Referenced as **C1…C
 | C52 | UI automation | **`XcodeBuildMCP` 2.7.0**, project-scoped and version-pinned in `.mcp.json`, with `ui-automation` enabled via `.xcodebuildmcp/config.yaml`. Semantic `snapshot_ui` + `tap`, not coordinates. | Added in Phase 4 after three phases of accumulating manual tap checks. **Closed 12 of the 13 outstanding manual checks in one pass**, including the row swipe actions and pagination that `simctl` cannot reach at all. Use it for every gate from Phase 5 on; the `simctl` fallback stays for build/install/screenshot. |
 | C54 | `UIPasteboard` for "Copy My Changes" | **Allowed**, in `ArticleEditorView` only, and written with `setItems(_:options:)` using `.localOnly: true` and a 10-minute expiry — never `.string`. | iOS 17 has no programmatic SwiftUI clipboard write: `.copyable` needs focus and a selection, `ShareLink` is a share sheet and cannot live inside an `.alert`, `PasteButton` only reads. The interop cost is nil — one line, no wrapper, no lifecycle. The **real** reason to scope it is privacy, not style: articles document gate codes and key locations, and `UIPasteboard.general` is readable by every other app and syncs to the admin's Mac and iPad via Universal Clipboard. `localOnly` plus an expiry keeps a rescued draft on one device and clears it unattended. |
 | C55 | Distribution | **Unlisted on the App Store** — not discoverable by search, installable by anyone with the link. | Owner's decision, Phase 11 step 8. Beats TestFlight (90-day build expiry, re-upload a few times a year) and cabled installs (every phone at the Mac) for a family spread across households. The cost is that it is a real App Store submission: full App Review, and unlisted status is itself a request Apple has to approve. See §9. |
+| C56 | Privacy policy in the app | A **bundled** policy screen, reached from a small secondary link at the bottom of Information. `docs/privacy-policy.md` stays the hosted copy App Store Connect requires. | Owner's request. Bundled rather than linked out because a link is useless at the cabin with no signal, and this is the screen someone opens precisely when wondering what happens to their photos — everything else in the app works offline, so this should too. Two copies of a legal document rot silently, so `PrivacyPolicyDriftTests` fails until both `Last updated` dates match; a comment saying "keep these in sync" is not enforcement. |
 
 ---
 
@@ -975,10 +976,21 @@ AppComposition.init() closure #4 → CacheStore.clear()
 
 **Not covered:** admin CRUD and a real image upload against production, both of which need an admin credential. They are covered against the local API and by the suite, but the deployed pair has not been exercised through them from iOS.
 
-##### Steps 6 and 9 — still with the owner
+##### Step 6 — physical iPhone ✅
 
-- **Step 6, physical iPhone:** needs a device. Production is up, and the Release build now genuinely runs against it — the simulator run above is the same binary configuration a phone would get. A hands-on **VoiceOver** pass belongs here too (see step 3).
-- **Step 9, tag `client-v1`:** deliberately waiting. The gate requires the device run, and tagging a release that has never run on real hardware would make the tag a lie.
+Run on the owner's iPhone 13 from a **Release** build against production, with signing configured (team `JK7P9CS69J`) and an app icon added. Every screen loaded. **The VoiceOver pass was clean** — the month grid announced full dates, and no control read out as an unnamed "button".
+
+##### Step 9 — tag `client-v1`
+
+The gate is met. Tagging is the last remaining action.
+
+##### After the gate: C56, and a defect it exposed
+
+The owner asked for the privacy policy to be readable inside the app. Added as a bundled screen behind a small secondary link at the bottom of Information.
+
+Building it surfaced something the step 3 accessibility pass had missed: **`BlockView`'s bullet lists had no accessibility treatment at all**, so VoiceOver announced the glyph before every item — "bullet, life jackets, bullet, radio" — in every knowledge-base article. Both renderers now collapse each row to one element labelled with the item text alone.
+
+**Honest limitation:** `snapshot_ui` reports the raw view hierarchy's text rather than the resolved accessibility tree, so it still lists the bullet glyph and cannot confirm the fix. The construction used — `.accessibilityElement(children: .ignore)` plus an explicit `.accessibilityLabel` — is the documented-correct one and is strictly better than the previous no treatment at all, but **it wants thirty seconds of VoiceOver on device to confirm**, alongside a look at the new screen, which the hardware run predates.
 
 ---
 
