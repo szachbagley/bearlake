@@ -50,6 +50,7 @@ struct InformationView: View {
             }
             quickTipsSection
             knowledgeBaseSection
+            privacySection
         }
         .navigationTitle("Information")
         .task { await model.load() }
@@ -181,6 +182,22 @@ struct InformationView: View {
     }
 
     // MARK: - Knowledge base
+
+    /// C56. Deliberately plain and last: a footnote, not a feature. The App
+    /// Store needs a hosted policy URL regardless, but a link is useless at
+    /// the cabin with no signal, so this reads the bundled copy.
+    private var privacySection: some View {
+        Section {
+            NavigationLink {
+                PrivacyPolicyView()
+            } label: {
+                Text("Privacy Policy")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .listRowBackground(Color.clear)
+        }
+    }
 
     private var knowledgeBaseSection: some View {
         Section {
