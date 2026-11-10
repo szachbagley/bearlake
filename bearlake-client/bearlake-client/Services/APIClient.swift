@@ -18,6 +18,8 @@ actor APIClient: BearLakeAPI {
 
     /// Called when the session cannot be recovered — a failed refresh, or a
     /// 401 with no refresh token at all. The app routes to login.
+    private var sessionGeneration = UUID()
+    private let onSessionUpdated: @Sendable (PublicUser) async -> Void
     private let onSessionExpired: @Sendable () async -> Void
 
     /// Called when any route answers `PASSWORD_CHANGE_REQUIRED`.
@@ -38,11 +40,13 @@ actor APIClient: BearLakeAPI {
         session: URLSession = .shared,
         tokens: TokenStore,
         onSessionExpired: @escaping @Sendable () async -> Void = {},
-        onPasswordChangeRequired: @escaping @Sendable () async -> Void = {}
+        onPasswordChangeRequired: @escaping @Sendable () async -> Void = {},
+        onSessionUpdated: @escaping @Sendable (PublicUser) async -> Void = { _ in }
     ) {
         self.baseURL = baseURL
         self.session = session
         self.tokens = tokens
+        self.onSessionUpdated = onSessionUpdated
         self.onSessionExpired = onSessionExpired
         self.onPasswordChangeRequired = onPasswordChangeRequired
     }
@@ -95,12 +99,15 @@ actor APIClient: BearLakeAPI {
         authenticated: Bool = true,
         allowRefresh: Bool = true
     ) async throws -> Data {
+        let generation = sessionGeneration
         let token = authenticated ? await tokens.accessToken : nil
+        guard generation == sessionGeneration else { throw CancellationError() }
         let request = try makeRequest(
             path: path, method: method, query: query, body: body, accessToken: token
         )
 
         let (data, response) = try await send(request)
+        guard generation == sessionGeneration else { throw CancellationError() }
 
         guard response.statusCode == 401, authenticated, allowRefresh else {
             return try validate(data: data, response: response)
@@ -113,11 +120,14 @@ actor APIClient: BearLakeAPI {
             throw try mapError(data: data, status: response.statusCode)
         }
 
+        guard generation == sessionGeneration else { throw CancellationError() }
         let retryToken = await tokens.accessToken
+        guard generation == sessionGeneration else { throw CancellationError() }
         let retried = try makeRequest(
             path: path, method: method, query: query, body: body, accessToken: retryToken
         )
         let (retryData, retryResponse) = try await send(retried)
+        guard generation == sessionGeneration else { throw CancellationError() }
         return try validate(data: retryData, response: retryResponse)
     }
 
@@ -179,8 +189,11 @@ actor APIClient: BearLakeAPI {
             return await existing.value
         }
 
+        let generation = sessionGeneration
         let task = Task<Bool, Never> { [tokens, onSessionExpired] in
-            guard let refreshToken = await tokens.refreshToken else {
+            let storedRefreshToken = await tokens.refreshToken
+            guard generation == sessionGeneration else { return false }
+            guard let refreshToken = storedRefreshToken else {
                 await tokens.clear()
                 await onSessionExpired()
                 return false
@@ -195,7 +208,10 @@ actor APIClient: BearLakeAPI {
                     allowRefresh: false
                 )
                 let session = try decoder.decode(SessionResult.self, from: data)
+                guard generation == sessionGeneration else { return false }
                 try await tokens.store(session)
+                guard generation == sessionGeneration else { return false }
+                await onSessionUpdated(session.user)
                 return true
             } catch let error as APIError where error.is(.network) {
                 // The request never reached the server, so this says nothing
@@ -206,6 +222,7 @@ actor APIClient: BearLakeAPI {
                 // cache (C46).
                 return false
             } catch {
+                guard generation == sessionGeneration else { return false }
                 // The refresh token really is dead: expired, revoked, or part
                 // of a family the server killed. Clearing is the only safe
                 // move — retrying with it risks tripping theft detection.
@@ -217,7 +234,7 @@ actor APIClient: BearLakeAPI {
 
         refreshTask = task
         let succeeded = await task.value
-        refreshTask = nil
+        if generation == sessionGeneration { refreshTask = nil }
         return succeeded
     }
 
@@ -265,6 +282,9 @@ actor APIClient: BearLakeAPI {
     // MARK: - Auth
 
     func login(email: String, password: String) async throws -> SessionResult {
+        sessionGeneration = UUID()
+        refreshTask?.cancel()
+        refreshTask = nil
         let body = try encoder.encode(LoginRequest(email: email, password: password))
         let data = try await perform(
             path: "auth/login", method: .post, body: body,
@@ -286,6 +306,9 @@ actor APIClient: BearLakeAPI {
     /// The clear is awaited rather than fired off in a `defer`, so a caller
     /// that checks `hasSession` immediately afterwards sees the truth.
     func logout() async throws {
+        sessionGeneration = UUID()
+        refreshTask?.cancel()
+        refreshTask = nil
         if let refreshToken = await tokens.refreshToken {
             try? await requestVoid(
                 path: "auth/logout", method: .post, body: LogoutRequest(refreshToken: refreshToken)

@@ -31,6 +31,7 @@ final class InformationViewModel {
 
     func load() async {
         guard isLoading == false else { return }
+        let generation = cache?.generation
         isLoading = true
         defer { isLoading = false; hasLoadedOnce = true }
 
@@ -44,9 +45,18 @@ final class InformationViewModel {
             // client does not re-sort, so an admin's reordering is the single
             // source of truth.
             let fetched = try await api.listQuickTips()
+            guard cache?.generation == generation else { quickTips = []; categories = []; isOffline = false; return }
             quickTips = fetched
             cache?.save(quickTips: fetched)
         } catch {
+            guard cache?.generation == generation else { quickTips = []; categories = []; isOffline = false; return }
+            if CacheFallback.invalidatesContent(error) {
+                cache?.clear()
+                quickTips = []; categories = []
+                isOffline = false
+                errorMessage = CacheFallback.message(error, "Access to this content is unavailable.")
+                return
+            }
             switch CacheFallback.forList(
                 error, cached: cache?.quickTips() ?? [],
                 fallback: "Couldn't load the quick tips."
@@ -55,15 +65,25 @@ final class InformationViewModel {
                 quickTips = items
                 servedFromCache = true
             case .failed(let message):
+                quickTips = []
                 firstError = message
             }
         }
 
         do {
             let fetched = try await api.listCategories()
+            guard cache?.generation == generation else { quickTips = []; categories = []; isOffline = false; return }
             categories = fetched
             cache?.save(categories: fetched)
         } catch {
+            guard cache?.generation == generation else { quickTips = []; categories = []; isOffline = false; return }
+            if CacheFallback.invalidatesContent(error) {
+                cache?.clear()
+                quickTips = []; categories = []
+                isOffline = false
+                errorMessage = CacheFallback.message(error, "Access to this content is unavailable.")
+                return
+            }
             switch CacheFallback.forList(
                 error, cached: cache?.categories() ?? [],
                 fallback: "Couldn't load the knowledge base."
@@ -72,12 +92,13 @@ final class InformationViewModel {
                 categories = items
                 servedFromCache = true
             case .failed(let message):
+                categories = []
                 firstError = firstError ?? message
             }
         }
 
         isOffline = servedFromCache
-        errorMessage = servedFromCache ? nil : firstError
+        errorMessage = firstError
     }
 
     // MARK: - Quick tips

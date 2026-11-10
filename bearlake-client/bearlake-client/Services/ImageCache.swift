@@ -23,7 +23,12 @@ actor ImageCache {
     private var cached: [String: UIImage] = [:]
     /// In-flight loads, so two views appearing together fetch once rather
     /// than twice.
-    private var inFlight: [String: Task<UIImage, Error>] = [:]
+    private struct Flight {
+        let id = UUID()
+        let task: Task<UIImage, Error>
+    }
+    private var inFlight: [String: Flight] = [:]
+    private(set) var generation = UUID()
     private let loader: Loader
     private let countLimit: Int
     /// Insertion order, for evicting the oldest when the limit is reached.
@@ -44,8 +49,15 @@ actor ImageCache {
     ///   - url: the presigned URL from *this* response. Used only to fetch,
     ///     never to identify.
     func image(forKey key: String, url: URL) async throws -> UIImage {
+        try Task.checkCancellation()
+        let generation = self.generation
         if let hit = cached[key] { return hit }
-        if let existing = inFlight[key] { return try await existing.value }
+        if let existing = inFlight[key] {
+            let image = try await existing.task.value
+            try Task.checkCancellation()
+            guard generation == self.generation else { throw CancellationError() }
+            return image
+        }
 
         let task = Task<UIImage, Error> { [loader] in
             let data = try await loader(url)
@@ -54,18 +66,21 @@ actor ImageCache {
             }
             return image
         }
-        inFlight[key] = task
+        let flight = Flight(task: task)
+        inFlight[key] = flight
 
         do {
             let image = try await task.value
-            inFlight[key] = nil
+            try Task.checkCancellation()
+            guard generation == self.generation else { throw CancellationError() }
+            if inFlight[key]?.id == flight.id { inFlight[key] = nil }
             store(image, forKey: key)
             return image
         } catch {
             // Not cached: a failure here is usually an expired URL, and the
             // next read carries a fresh one. Caching the failure would make a
             // recoverable problem permanent.
-            inFlight[key] = nil
+            if inFlight[key]?.id == flight.id { inFlight[key] = nil }
             throw error
         }
     }
@@ -81,7 +96,8 @@ actor ImageCache {
     /// The bytes are the exact JPEG that went to S3, so this is the same
     /// image the next read would return.
     @discardableResult
-    func insert(_ data: Data, forKey key: String) -> Bool {
+    func insert(_ data: Data, forKey key: String, generation: UUID? = nil) -> Bool {
+        if let generation, generation != self.generation { return false }
         guard let image = UIImage(data: data) else { return false }
         store(image, forKey: key)
         return true
@@ -90,6 +106,9 @@ actor ImageCache {
     var count: Int { cached.count }
 
     func clear() {
+        generation = UUID()
+        for flight in inFlight.values { flight.task.cancel() }
+        inFlight.removeAll()
         cached.removeAll()
         keyOrder.removeAll()
     }

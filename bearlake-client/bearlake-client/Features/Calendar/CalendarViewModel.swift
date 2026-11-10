@@ -147,6 +147,7 @@ final class CalendarViewModel {
 
     func load() async {
         guard isLoading == false, let window = fetchWindow else { return }
+        let generation = cache?.generation
         isLoading = true
         defer { isLoading = false }
 
@@ -155,12 +156,21 @@ final class CalendarViewModel {
 
         do {
             let fetched = try await api.listEvents(start: window.start, end: window.end)
+            guard cache?.generation == generation else { events = []; loadedWindow = nil; pendingAction = nil; isOffline = false; return }
             events = fetched
             loadedWindow = (startDay, endDay)
             errorMessage = nil
             isOffline = false
             cache?.save(events: fetched, window: startDay...endDay)
         } catch {
+            guard cache?.generation == generation else { events = []; loadedWindow = nil; pendingAction = nil; isOffline = false; return }
+            if CacheFallback.invalidatesContent(error) {
+                cache?.clear()
+                events = []; loadedWindow = nil; pendingAction = nil
+                isOffline = false
+                errorMessage = CacheFallback.message(error, "Access to this content is unavailable.")
+                return
+            }
             switch CacheFallback.forList(
                 error, cached: cache?.events() ?? [],
                 fallback: "Couldn't load the calendar."
@@ -173,6 +183,7 @@ final class CalendarViewModel {
                 isOffline = true
                 errorMessage = nil
             case .failed(let message):
+                events = []; loadedWindow = nil; pendingAction = nil
                 isOffline = false
                 errorMessage = message
             }

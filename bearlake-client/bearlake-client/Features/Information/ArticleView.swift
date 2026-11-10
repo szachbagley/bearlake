@@ -74,6 +74,9 @@ struct ArticleView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await model.load() }
         .refreshable { await model.load() }
+        .onDisappear {
+            Task { await cache.clear() }
+        }
         .toolbar {
             // Admin-only affordance; the server rejects a non-admin PATCH
             // regardless (C48).

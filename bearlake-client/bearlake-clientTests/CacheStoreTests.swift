@@ -265,3 +265,17 @@ struct ClearIsExhaustiveTests {
         #expect(store.isEmpty)
     }
 }
+
+
+@MainActor
+struct CacheGenerationTests {
+    @Test("clear rotates generation and discards privileged cached data")
+    func clearBoundary() throws {
+        let store = try makeStore()
+        store.save(announcements: [.fixture(id: "old")], replacingAll: true)
+        let before = store.generation
+        store.clear()
+        #expect(store.generation != before)
+        #expect(store.isEmpty)
+    }
+}

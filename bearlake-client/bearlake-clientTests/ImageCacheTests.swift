@@ -151,3 +151,54 @@ struct ImageCacheTests {
         #expect(recorder.count == 1)
     }
 }
+
+/// Deliberately ignores cancellation to reproduce a transport finishing late.
+private actor DeferredImageLoader {
+    private var pending: [String: CheckedContinuation<Data, Never>] = [:]
+
+    func load(_ url: URL) async -> Data {
+        await withCheckedContinuation { pending[url.absoluteString] = $0 }
+    }
+
+    func isWaiting(_ url: URL) -> Bool { pending[url.absoluteString] != nil }
+
+    func complete(_ url: URL, data: Data) {
+        pending.removeValue(forKey: url.absoluteString)?.resume(returning: data)
+    }
+}
+
+extension ImageCacheTests {
+    @Test("clear prevents a delayed old load from returning or replacing a new flight")
+    func clearRejectsDelayedCompletion() async throws {
+        let loader = DeferredImageLoader()
+        let cache = ImageCache(loader: { await loader.load($0) })
+        let oldURL = presigned(keyA, expires: "old-session")
+        let newURL = presigned(keyA, expires: "new-session")
+        let old = Task { try await cache.image(forKey: keyA, url: oldURL) }
+        while await loader.isWaiting(oldURL) == false { await Task.yield() }
+        await cache.clear()
+        let current = Task { try await cache.image(forKey: keyA, url: newURL) }
+        while await loader.isWaiting(newURL) == false { await Task.yield() }
+
+        await loader.complete(oldURL, data: tinyPNG())
+        await #expect(throws: CancellationError.self) { try await old.value }
+        #expect(await cache.count == 0)
+
+        await loader.complete(newURL, data: tinyPNG())
+        _ = try await current.value
+        #expect(await cache.count == 1)
+        #expect(await cache.cachedImage(forKey: keyA) != nil)
+    }
+
+    @Test("clear rejects a delayed upload seed from the old generation")
+    func clearRejectsOldInsert() async {
+        let cache = ImageCache()
+        let generation = await cache.generation
+        #expect(await cache.insert(tinyPNG(), forKey: keyA, generation: generation))
+        await cache.clear()
+        #expect(await cache.count == 0)
+        #expect(await cache.insert(tinyPNG(), forKey: keyB, generation: generation) == false)
+        #expect(await cache.count == 0)
+        #expect(await cache.insert(tinyPNG(), forKey: keyB, generation: await cache.generation))
+    }
+}

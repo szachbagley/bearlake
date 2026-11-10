@@ -20,6 +20,8 @@ import SwiftData
 final class CacheStore {
     private let context: ModelContext
     private let dates: CabinDate
+    private(set) var generation = UUID()
+    private var isReadable = true
 
     init(context: ModelContext, dates: CabinDate = CabinDate()) {
         self.context = context
@@ -207,6 +209,9 @@ final class CacheStore {
     /// Empties every table. The next user must not see the previous user's
     /// content, and a member must not inherit an admin's cached drafts.
     func clear() {
+        generation = UUID()
+        isReadable = false
+        do {
         // Listed concretely, never by looping `CacheSchema.models`.
         //
         // That array is `[any PersistentModel.Type]`, and handing an
@@ -222,13 +227,18 @@ final class CacheStore {
         //
         // If you add a `@Model`, add it here as well — `modelCount` below is
         // the tripwire that fails the test if you forget.
-        try? context.delete(model: CachedAnnouncement.self)
-        try? context.delete(model: CachedEvent.self)
-        try? context.delete(model: CachedQuickTip.self)
-        try? context.delete(model: CachedCategory.self)
-        try? context.delete(model: CachedArticleSummary.self)
-        try? context.delete(model: CachedArticle.self)
-        commit()
+        try context.delete(model: CachedAnnouncement.self)
+        try context.delete(model: CachedEvent.self)
+        try context.delete(model: CachedQuickTip.self)
+        try context.delete(model: CachedCategory.self)
+        try context.delete(model: CachedArticleSummary.self)
+        try context.delete(model: CachedArticle.self)
+        try context.save()
+        isReadable = true
+        } catch {
+            // Fail closed: a failed purge must not expose another session.
+            context.rollback()
+        }
     }
 
     var isEmpty: Bool {
@@ -243,7 +253,8 @@ final class CacheStore {
     // MARK: - Plumbing
 
     private func fetch<T: PersistentModel>(_ descriptor: FetchDescriptor<T>) -> [T] {
-        (try? context.fetch(descriptor)) ?? []
+        guard isReadable else { return [] }
+        return (try? context.fetch(descriptor)) ?? []
     }
 
     /// Generic, not `any PersistentModel.Type`: the concrete type must stay

@@ -194,6 +194,7 @@ final class ArticleEditorViewModel {
                 uploadProgress = nil
             }
         }
+        let imageGeneration = await cache?.generation
         do {
             let prepared = try await uploader.upload(data, articleID: articleID) { [weak self] value in
                 Task { @MainActor [weak self] in
@@ -204,7 +205,12 @@ final class ArticleEditorViewModel {
             // Seed the cache with the exact bytes that went to S3 so the new
             // block previews immediately; the block itself still carries only
             // the key (C34, C35).
-            await cache?.insert(prepared.data, forKey: prepared.key)
+            try Task.checkCancellation()
+            if let cache, let imageGeneration {
+                guard await cache.insert(
+                    prepared.data, forKey: prepared.key, generation: imageGeneration
+                ) else { return }
+            }
             // url is nil: this block has never been read back from the API,
             // so there is no presigned URL yet. The next load supplies one.
             blocks.append(.image(id: Block.newID(), key: prepared.key, caption: nil, url: nil))

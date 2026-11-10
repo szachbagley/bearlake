@@ -48,6 +48,7 @@ final class HomeViewModel {
 
     func load() async {
         guard isLoading == false else { return }
+        let generation = cache?.generation
         isLoading = true
         defer { isLoading = false }
 
@@ -63,9 +64,18 @@ final class HomeViewModel {
             let page = try await api.listAnnouncements(
                 limit: Self.announcementPreviewCount, cursor: nil
             )
+            guard cache?.generation == generation else { announcements = []; upcoming = []; isOffline = false; return }
             announcements = page.items
             cache?.save(announcements: page.items, replacingAll: true)
         } catch {
+            guard cache?.generation == generation else { announcements = []; upcoming = []; isOffline = false; return }
+            if CacheFallback.invalidatesContent(error) {
+                cache?.clear()
+                announcements = []; upcoming = []
+                isOffline = false
+                errorMessage = CacheFallback.message(error, "Access to this content is unavailable.")
+                return
+            }
             switch CacheFallback.forList(
                 error,
                 cached: cache?.announcements(limit: Self.announcementPreviewCount) ?? [],
@@ -75,13 +85,24 @@ final class HomeViewModel {
                 announcements = items
                 servedFromCache = true
             case .failed(let message):
+                announcements = []
                 firstError = message
             }
         }
 
         do {
-            upcoming = try await loadUpcoming()
+            let fetchedUpcoming = try await loadUpcoming()
+            guard cache?.generation == generation else { announcements = []; upcoming = []; isOffline = false; return }
+            upcoming = fetchedUpcoming
         } catch {
+            guard cache?.generation == generation else { announcements = []; upcoming = []; isOffline = false; return }
+            if CacheFallback.invalidatesContent(error) {
+                cache?.clear()
+                announcements = []; upcoming = []
+                isOffline = false
+                errorMessage = CacheFallback.message(error, "Access to this content is unavailable.")
+                return
+            }
             switch CacheFallback.forList(
                 error, cached: cachedUpcoming(), fallback: "Couldn't load the calendar."
             ) {
@@ -89,6 +110,7 @@ final class HomeViewModel {
                 upcoming = events
                 servedFromCache = true
             case .failed(let message):
+                upcoming = []
                 firstError = firstError ?? message
             }
         }
@@ -96,7 +118,7 @@ final class HomeViewModel {
         isOffline = servedFromCache
         // The banner already explains a cache read; an alert on top of it
         // would be the same news twice.
-        errorMessage = servedFromCache ? nil : firstError
+        errorMessage = firstError
     }
 
     /// The next three events.
@@ -111,6 +133,7 @@ final class HomeViewModel {
     /// ago and is still running, both belong in "upcoming". Filtering by
     /// end time afterwards is what actually drops the past ones.
     private func loadUpcoming() async throws -> [CalendarEvent] {
+        let generation = cache?.generation
         let reference = now()
         let startOfToday = dates.calendar.startOfDay(for: reference)
         guard let windowEnd = dates.calendar.date(
@@ -120,6 +143,7 @@ final class HomeViewModel {
         }
 
         let fetched = try await api.listEvents(start: startOfToday, end: windowEnd)
+        guard cache?.generation == generation else { throw CancellationError() }
         cache?.save(
             events: fetched,
             window: dates.dateOnlyString(from: startOfToday)...dates.dateOnlyString(from: windowEnd)

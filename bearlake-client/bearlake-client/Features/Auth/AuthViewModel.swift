@@ -32,6 +32,8 @@ enum SessionState: Equatable, Sendable {
 @MainActor
 @Observable
 final class AuthViewModel {
+    private(set) var sessionGeneration = UUID()
+    private var operationGeneration = UUID()
     private(set) var state: SessionState = .restoring
     private(set) var isWorking = false
 
@@ -43,7 +45,7 @@ final class AuthViewModel {
     private let api: BearLakeAPI
     private let tokens: TokenStore
 
-    /// Runs whenever a session ends, for either reason.
+    /// Invalidates content before a session ends or its identity/privileges change.
     ///
     /// A closure rather than a `CacheStore`, so auth stays unaware of the
     /// cache — and typed `@MainActor` deliberately: storing an isolated
@@ -79,9 +81,11 @@ final class AuthViewModel {
             state = .signedOut
             return
         }
+        let operation = operationGeneration
         do {
             let user = try await api.me()
-            state = gatedState(for: user)
+            guard operation == operationGeneration else { return }
+            establishSession(user)
         } catch let error as APIError where error.is(.network) {
             // Launched with no signal. We cannot tell whether the token is
             // still good, so keep it *and* the cached content — destroying
@@ -105,12 +109,14 @@ final class AuthViewModel {
         isWorking = true
         defer { isWorking = false }
 
+        let operation = operationGeneration
         do {
             let session = try await api.login(
                 email: email.trimmingCharacters(in: .whitespacesAndNewlines),
                 password: password
             )
-            state = gatedState(for: session.user)
+            guard operation == operationGeneration else { return }
+            establishSession(session.user)
         } catch let error as APIError {
             loginError = loginMessage(for: error)
         } catch {
@@ -149,6 +155,7 @@ final class AuthViewModel {
         isWorking = true
         defer { isWorking = false }
 
+        let operation = operationGeneration
         do {
             let session = try await api.changePassword(
                 currentPassword: current, newPassword: new
@@ -156,7 +163,8 @@ final class AuthViewModel {
             // The server revokes every other refresh token on a change, so
             // the pair in this response is the only live credential — and
             // mustChangePassword is now false, which lifts the gate.
-            state = gatedState(for: session.user)
+            guard operation == operationGeneration else { return false }
+            establishSession(session.user)
             return true
         } catch let error as APIError {
             // Server validation messages are display-safe and more specific
@@ -189,9 +197,12 @@ final class AuthViewModel {
     /// a failed sign-out that leaves the user apparently signed in is worse
     /// than the error it would report.
     func logout() async {
+        // Keep the login form disabled until revocation and local clearing finish.
+        isWorking = true
+        defer { isWorking = false }
+        signedOut()
         try? await api.logout()
         await tokens.clear()
-        signedOut()
     }
 
     // MARK: - Gate
@@ -200,6 +211,7 @@ final class AuthViewModel {
     /// — the gate can fire from anywhere, not only at login (C4 step 4).
     func requirePasswordChange() {
         guard let user = state.user else { return }
+        invalidateContent()
         state = .mustChangePassword(user)
     }
 
@@ -211,8 +223,28 @@ final class AuthViewModel {
     /// Step 4. Every path out of a session runs through here, so the cache
     /// cannot be emptied on one of them and left behind on the other.
     private func signedOut() {
+        operationGeneration = UUID()
+        invalidateContent()
         state = .signedOut
+    }
+
+    private func invalidateContent() {
+        sessionGeneration = UUID()
         onSignedOut()
+    }
+
+    func sessionUpdated(_ user: PublicUser) {
+        guard state.user?.id == user.id else { return }
+        establishSession(user)
+    }
+
+    private func establishSession(_ user: PublicUser) {
+        // Clear before publishing identity, including the offline-restore login path.
+        if state.user?.id != user.id || state.user?.role != user.role
+            || state.user?.mustChangePassword != user.mustChangePassword {
+            invalidateContent()
+        }
+        state = gatedState(for: user)
     }
 
     private func gatedState(for user: PublicUser) -> SessionState {

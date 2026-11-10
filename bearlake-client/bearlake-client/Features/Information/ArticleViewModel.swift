@@ -60,15 +60,25 @@ final class ArticleViewModel {
 
     func load() async {
         guard isLoading == false else { return }
+        let generation = cache?.generation
         isLoading = true
         defer { isLoading = false; hasLoadedOnce = true }
         do {
             let fetched = try await api.getArticle(id: articleID)
+            guard cache?.generation == generation else { article = nil; isOffline = false; return }
             article = fetched
             errorMessage = nil
             isOffline = false
             cache?.save(article: fetched)
         } catch {
+            guard cache?.generation == generation else { article = nil; isOffline = false; return }
+            if CacheFallback.invalidatesContent(error) {
+                cache?.clear()
+                article = nil
+                isOffline = false
+                errorMessage = CacheFallback.message(error, "Access to this content is unavailable.")
+                return
+            }
             switch CacheFallback.forItem(
                 error, cached: cache?.article(id: articleID),
                 fallback: "Couldn't load this article."
@@ -78,6 +88,7 @@ final class ArticleViewModel {
                 isOffline = true
                 errorMessage = nil
             case .failed(let message):
+                article = nil
                 isOffline = false
                 errorMessage = message
             }

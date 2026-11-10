@@ -75,7 +75,11 @@ struct CachedAsyncImage: View {
         }
         didFail = false
         do {
-            image = try await cache.image(forKey: key, url: url)
+            let loaded = try await cache.image(forKey: key, url: url)
+            try Task.checkCancellation()
+            image = loaded
+        } catch is CancellationError {
+            image = nil
         } catch {
             // Never rethrown: one unreachable photo must not take the article
             // down with it.
