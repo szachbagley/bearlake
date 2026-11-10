@@ -549,3 +549,59 @@ struct OfflineAccountSwitchTests {
         #expect(article.errorMessage != nil)
     }
 }
+
+
+@MainActor
+struct RealClientRefreshRestoreTests {
+    @Test("real refresh transport failure preserves startup credentials and warm cache")
+    func networkRestoreRetainsCache() async throws {
+        let cache = try makeStore()
+        cache.save(quickTips: [.fixture(id: "saved-tip")])
+        let state = StubState()
+        state.setHandler { request in
+            if request.url?.path.hasSuffix("/auth/refresh") == true {
+                return .init(error: URLError(.notConnectedToInternet))
+            }
+            return .init(status: 401, body: Data(#"{"error":{"code":"UNAUTHENTICATED","message":"Expired."}}"#.utf8))
+        }
+        let secure = InMemorySecureStore()
+        try secure.save("original", for: "refresh")
+        let tokens = TokenStore(secureStore: secure, key: "refresh")
+        let expired = LockedFlag()
+        let client = APIClient(baseURL: try #require(URL(string: "https://api.test/api/v1")),
+                               session: TestSession.make(state), tokens: tokens,
+                               onSessionExpired: { expired.set() })
+        let auth = AuthViewModel(api: client, tokens: tokens) { cache.clear() }
+        await auth.restore()
+        #expect(auth.state == .signedOut)
+        #expect(await tokens.refreshToken == "original")
+        #expect(cache.quickTips().map(\.id) == ["saved-tip"])
+        #expect(!expired.value)
+        #expect(state.count(path: "/me") == 1)
+        #expect(state.count(path: "/auth/refresh") == 1)
+    }
+
+    @Test("real revoked refresh clears startup credentials and warm cache")
+    func revokedRestoreClearsCache() async throws {
+        let cache = try makeStore()
+        cache.save(quickTips: [.fixture(id: "saved-tip")])
+        let state = StubState()
+        state.setHandler { _ in
+            .init(status: 401, body: Data(#"{"error":{"code":"UNAUTHENTICATED","message":"Revoked."}}"#.utf8))
+        }
+        let secure = InMemorySecureStore()
+        try secure.save("original", for: "refresh")
+        let tokens = TokenStore(secureStore: secure, key: "refresh")
+        let expired = LockedFlag()
+        let client = APIClient(baseURL: try #require(URL(string: "https://api.test/api/v1")),
+                               session: TestSession.make(state), tokens: tokens,
+                               onSessionExpired: { expired.set() })
+        let auth = AuthViewModel(api: client, tokens: tokens) { cache.clear() }
+        await auth.restore()
+        #expect(auth.state == .signedOut)
+        #expect(await tokens.hasSession == false)
+        #expect(cache.isEmpty)
+        #expect(expired.value)
+        #expect(state.count(path: "/auth/refresh") == 1)
+    }
+}

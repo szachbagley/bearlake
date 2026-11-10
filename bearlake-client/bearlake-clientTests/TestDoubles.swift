@@ -27,6 +27,15 @@ final class StubState: @unchecked Sendable {
     struct Response {
         let status: Int
         let body: Data
+        let error: URLError?
+        let gate: StubResponseGate?
+
+        init(status: Int = 0, body: Data = Data(), error: URLError? = nil, gate: StubResponseGate? = nil) {
+            self.status = status
+            self.body = body
+            self.error = error
+            self.gate = gate
+        }
     }
 
     private let lock = NSLock()
@@ -66,6 +75,8 @@ final class StubState: @unchecked Sendable {
 }
 
 final class StubURLProtocol: URLProtocol {
+    private let deliveryLock = NSLock()
+    private var stopped = false
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
@@ -83,6 +94,24 @@ final class StubURLProtocol: URLProtocol {
         state.record(request)
         let stubbed = state.respond(to: request)
 
+        if let gate = stubbed.gate {
+            Task {
+                await gate.wait()
+                deliver(stubbed)
+            }
+        } else {
+            deliver(stubbed)
+        }
+    }
+
+    private func deliver(_ stubbed: StubState.Response) {
+        deliveryLock.lock()
+        defer { deliveryLock.unlock() }
+        guard !stopped else { return }
+        if let error = stubbed.error {
+            client?.urlProtocol(self, didFailWithError: error)
+            return
+        }
         guard let url = request.url,
               let response = HTTPURLResponse(
                   url: url, statusCode: stubbed.status, httpVersion: "HTTP/1.1", headerFields: nil
@@ -99,7 +128,10 @@ final class StubURLProtocol: URLProtocol {
         client?.urlProtocolDidFinishLoading(self)
     }
 
-    override func stopLoading() {}
+    override func stopLoading() {
+        deliveryLock.lock(); defer { deliveryLock.unlock() }
+        stopped = true
+    }
 }
 
 /// A `URLProtocol` that always fails the transport, for the offline path.
@@ -184,5 +216,24 @@ final class StubRegistry: @unchecked Sendable {
     func state(for id: String) -> StubState? {
         lock.lock(); defer { lock.unlock() }
         return states[id]
+    }
+}
+
+
+/// Holds a selected response without blocking URLSession's protocol queue.
+actor StubResponseGate {
+    private var opened = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !opened else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func open() {
+        opened = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending { waiter.resume() }
     }
 }

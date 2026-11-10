@@ -33,7 +33,11 @@ actor APIClient: BearLakeAPI {
 
     /// The refresh currently in progress, if any. Concurrent 401s await this
     /// same task rather than each starting their own.
-    private var refreshTask: Task<Bool, Never>?
+    private var refreshTask: Task<Bool, Error>?
+    private var refreshTaskID: UUID?
+    // Requests already underway share an outcome even if their 401 arrives
+    // just after that flight completes. A new request snapshots the new ID.
+    private var completedRefresh: (id: UUID, result: Result<Bool, Error>)?
 
     init(
         baseURL: URL,
@@ -100,6 +104,7 @@ actor APIClient: BearLakeAPI {
         allowRefresh: Bool = true
     ) async throws -> Data {
         let generation = sessionGeneration
+        let previousRefreshID = completedRefresh?.id
         let token = authenticated ? await tokens.accessToken : nil
         guard generation == sessionGeneration else { throw CancellationError() }
         let request = try makeRequest(
@@ -116,7 +121,7 @@ actor APIClient: BearLakeAPI {
         // 401 — refresh once, then retry exactly once. A second 401 after a
         // successful refresh is a real authorization failure, not a stale
         // token, so it is surfaced rather than looped on.
-        guard await refreshSession() else {
+        guard try await refreshSession(after: previousRefreshID) else {
             throw try mapError(data: data, status: response.statusCode)
         }
 
@@ -184,15 +189,19 @@ actor APIClient: BearLakeAPI {
     /// Being an actor method, the check-and-set below cannot interleave: a
     /// second caller entering while the first is suspended finds the task
     /// already stored and awaits it.
-    private func refreshSession() async -> Bool {
+    private func refreshSession(after previousID: UUID?) async throws -> Bool {
+        if let completedRefresh, completedRefresh.id != previousID {
+            return try completedRefresh.result.get()
+        }
         if let existing = refreshTask {
-            return await existing.value
+            return try await existing.value
         }
 
         let generation = sessionGeneration
-        let task = Task<Bool, Never> { [tokens, onSessionExpired] in
+        let taskID = UUID()
+        let task = Task<Bool, Error> { [tokens, onSessionExpired] in
             let storedRefreshToken = await tokens.refreshToken
-            guard generation == sessionGeneration else { return false }
+            guard generation == sessionGeneration else { throw CancellationError() }
             guard let refreshToken = storedRefreshToken else {
                 await tokens.clear()
                 await onSessionExpired()
@@ -208,24 +217,25 @@ actor APIClient: BearLakeAPI {
                     allowRefresh: false
                 )
                 let session = try decoder.decode(SessionResult.self, from: data)
-                guard generation == sessionGeneration else { return false }
+                guard generation == sessionGeneration else { throw CancellationError() }
                 try await tokens.store(session)
-                guard generation == sessionGeneration else { return false }
+                guard generation == sessionGeneration else { throw CancellationError() }
                 await onSessionUpdated(session.user)
                 return true
             } catch let error as APIError where error.is(.network) {
-                // The request never reached the server, so this says nothing
-                // about the token. Clearing here would turn a moment without
-                // signal into a permanent sign-out — and the family uses this
-                // at a lake with patchy coverage. Keep the token; the caller's
-                // request fails as a network error and falls back to the
-                // cache (C46).
-                return false
+                guard generation == sessionGeneration else { throw CancellationError() }
+                // A lost connection/timeout does not establish that the token
+                // was rejected, nor that the server never rotated it. Preserve
+                // credentials and the exact transport error for every waiter.
+                // No automatic replay: a later caller may attempt recovery.
+                throw error
+            } catch is CancellationError {
+                throw CancellationError()
             } catch {
-                guard generation == sessionGeneration else { return false }
-                // The refresh token really is dead: expired, revoked, or part
-                // of a family the server killed. Clearing is the only safe
-                // move — retrying with it risks tripping theft detection.
+                guard generation == sessionGeneration else { throw CancellationError() }
+                // Preserve the existing fail-closed path for rejected or
+                // unusable refresh responses. In particular, never replay a
+                // token the server explicitly revoked or rejected.
                 await tokens.clear()
                 await onSessionExpired()
                 return false
@@ -233,9 +243,18 @@ actor APIClient: BearLakeAPI {
         }
 
         refreshTask = task
-        let succeeded = await task.value
-        if generation == sessionGeneration { refreshTask = nil }
-        return succeeded
+        refreshTaskID = taskID
+        defer {
+            // An old flight must not erase a newer account's in-flight refresh.
+            if refreshTaskID == taskID {
+                refreshTask = nil
+                refreshTaskID = nil
+            }
+        }
+        let result = await task.result
+        guard generation == sessionGeneration else { throw CancellationError() }
+        completedRefresh = (taskID, result)
+        return try result.get()
     }
 
     // MARK: - Decoding helpers
@@ -285,6 +304,8 @@ actor APIClient: BearLakeAPI {
         sessionGeneration = UUID()
         refreshTask?.cancel()
         refreshTask = nil
+        refreshTaskID = nil
+        completedRefresh = nil
         let body = try encoder.encode(LoginRequest(email: email, password: password))
         let data = try await perform(
             path: "auth/login", method: .post, body: body,
@@ -309,6 +330,8 @@ actor APIClient: BearLakeAPI {
         sessionGeneration = UUID()
         refreshTask?.cancel()
         refreshTask = nil
+        refreshTaskID = nil
+        completedRefresh = nil
         if let refreshToken = await tokens.refreshToken {
             try? await requestVoid(
                 path: "auth/logout", method: .post, body: LogoutRequest(refreshToken: refreshToken)
