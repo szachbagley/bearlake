@@ -20,6 +20,7 @@ setting you flip beforehand.
 | Build | 1 |
 | Signing | Automatic, team `JK7P9CS69J` |
 | Minimum iOS | 17.0 |
+| Native device family | **iPhone only** (`UIDeviceFamily = [1]`); no native iPad support |
 | Category | Primary: **Lifestyle**. Secondary: Productivity |
 | Price | Free |
 | Age rating | 4+ — no objectionable content, no ads, no user-generated content visible to strangers |
@@ -109,8 +110,33 @@ In the **web app**, create a user for App Review:
 - [x] **Screenshots** — done. Four at **1320×2868** (Apple's 6.9" requirement) in
       `docs/app-store-screenshots/`: Home, Calendar, Information, and an article.
       Captured on iPhone 17 Pro Max with realistic cabin content. Apple accepts the
-      6.9" set alone and scales it for smaller devices, so no second size is needed.
+      6.9" set alone and scales it for smaller iPhones. This release targets only
+      the iPhone device family, so no native iPad screenshots are prepared. Verify
+      the final uploaded build still has `UIDeviceFamily = [1]` before using this set.
 - [ ] **Support URL.** Can be the same page as the privacy policy.
+
+### Release device-family verification
+
+- [ ] Check effective Debug and Release settings for both the app and test targets:
+      `TARGETED_DEVICE_FAMILY = 1`. Make project-setting changes through Xcode,
+      not by hand-editing `project.pbxproj`.
+- [ ] Inspect the final Release archive’s app `Info.plist`: `UIDeviceFamily` must
+      contain only `1`, not `2`. Preserve iOS 17.0, bundle ID, signing, and the
+      existing iPhone portrait/landscape orientations.
+- [ ] Run the unit suite and smoke-test launch/login, Home, Calendar, Information,
+      and the bundled privacy policy on an iPhone simulator.
+
+“iPhone only” describes native device-family support, not a guarantee that the app
+can never run on an iPad in compatibility mode. Mac and Apple Vision destination
+settings are unchanged by this release-scope decision.
+
+Validation for issue #35 (2026-11-11): effective Debug/Release settings for both
+app and test targets are `1`; the unsigned local Release archive contains
+`UIDeviceFamily = [1]`, no iPad orientation override, and the unchanged iPhone
+orientations, bundle ID, and minimum iOS 17.0. Debug (iPhone 16e) and Release
+(iPhone 17 Pro, testability enabled for the test command) each passed all 378 tests
+/ 428 parameterized executions on iOS 26.0. This does not replace signed archive
+validation in App Store Connect or the final signed-in iPhone smoke test.
 
 ## 6. Description — draft
 
