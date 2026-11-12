@@ -630,3 +630,169 @@ struct AnnouncementRequestShapeTests {
         #expect(request.url?.path.hasSuffix("/announcements/a1") == true)
     }
 }
+
+
+struct RefreshTransportTests {
+    private func rejection() -> StubState.Response {
+        .init(status: 401, body: json(#"{"error":{"code":"UNAUTHENTICATED","message":"Expired."}}"#))
+    }
+
+    @Test("refresh transport failures retain credentials without announcing expiry", arguments: [
+        URLError.Code.notConnectedToInternet, .networkConnectionLost, .timedOut,
+    ])
+    func transportErrorSurvives(_ code: URLError.Code) async throws {
+        let state = StubState()
+        state.setHandler { request in
+            request.url?.path.hasSuffix("/auth/refresh") == true
+                ? .init(error: URLError(code)) : rejection()
+        }
+        let secure = InMemorySecureStore()
+        try secure.save("original", for: "refresh")
+        let expired = LockedFlag()
+        let (client, tokens) = makeClient(state: state, store: secure) { expired.set() }
+        do {
+            _ = try await client.me()
+            Issue.record("expected the refresh transport error")
+        } catch let error as APIError {
+            #expect(error.status == 0)
+            #expect(error.is(.network))
+        }
+        #expect(await tokens.refreshToken == "original")
+        #expect(!expired.value)
+        #expect(state.count(path: "/me") == 1)
+        #expect(state.count(path: "/auth/refresh") == 1)
+    }
+
+    @Test("concurrent callers share a failed refresh and a later attempt can recover")
+    func sharedFailureThenRecovery() async throws {
+        let state = StubState()
+        let gate = StubResponseGate()
+        state.setHandler { request in
+            request.url?.path.hasSuffix("/auth/refresh") == true
+                ? .init(error: URLError(.networkConnectionLost), gate: gate) : rejection()
+        }
+        let secure = InMemorySecureStore()
+        try secure.save("original", for: "refresh")
+        let expired = LockedFlag()
+        let (client, tokens) = makeClient(state: state, store: secure) { expired.set() }
+        let calls = (0..<4).map { _ in
+            Task { () -> APIError? in
+                do { _ = try await client.me(); return nil }
+                catch { return error as? APIError }
+            }
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while (state.count(path: "/me") < 4 || state.count(path: "/auth/refresh") < 1),
+              ContinuousClock.now < deadline { await Task.yield() }
+        #expect(state.count(path: "/me") == 4)
+        // All protected responses have been delivered; give their continuations
+        // an actor turn to join the deliberately held refresh.
+        for _ in 0..<100 { await Task.yield() }
+        await gate.open()
+        for call in calls {
+            let error = await call.value
+            #expect(error?.is(.network) == true)
+            #expect(error?.status == 0)
+        }
+        #expect(state.count(path: "/auth/refresh") == 1)
+        #expect(await tokens.refreshToken == "original")
+        #expect(!expired.value)
+
+        state.setHandler { request in
+            if request.url?.path.hasSuffix("/auth/refresh") == true {
+                return .init(status: 200, body: json("""
+                {"accessToken":"new","refreshToken":"rotated","user":\(userJSON)}
+                """))
+            }
+            if request.value(forHTTPHeaderField: "Authorization") == "Bearer new" {
+                return .init(status: 200, body: json(userJSON))
+            }
+            return rejection()
+        }
+        let user = try await client.me()
+        #expect(user.id == "u1")
+        #expect(await tokens.refreshToken == "rotated")
+        #expect(state.count(path: "/auth/refresh") == 2)
+        #expect(state.count(path: "/me") == 6)
+    }
+
+    @Test("an obsolete refresh rejection after login cannot clear the new session")
+    func oldRefreshCannotExpireNewLogin() async throws {
+        let state = StubState()
+        let gate = StubResponseGate()
+        state.setHandler { request in
+            if request.url?.path.hasSuffix("/auth/refresh") == true {
+                return .init(status: 401, body: json(#"{"error":{"code":"UNAUTHENTICATED","message":"Revoked."}}"#), gate: gate)
+            }
+            if request.url?.path.hasSuffix("/auth/login") == true {
+                return .init(status: 200, body: json("""
+                {"accessToken":"new-login","refreshToken":"new-refresh","user":\(userJSON)}
+                """))
+            }
+            return rejection()
+        }
+        let secure = InMemorySecureStore()
+        try secure.save("original", for: "refresh")
+        let expired = LockedFlag()
+        let (client, tokens) = makeClient(state: state, store: secure) { expired.set() }
+        let old = Task { try? await client.me() }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while state.count(path: "/auth/refresh") == 0, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(state.count(path: "/auth/refresh") == 1)
+        _ = try await client.login(email: "z@example.com", password: "password1234")
+        await gate.open()
+        _ = await old.value
+        #expect(await tokens.accessToken == "new-login")
+        #expect(await tokens.refreshToken == "new-refresh")
+        #expect(!expired.value)
+    }
+}
+
+extension RefreshTransportTests {
+    @Test("a delayed overlapping 401 shares the refresh failure after its flight finishes")
+    func delayed401SharesCompletedFailure() async throws {
+        let state = StubState()
+        let delayed401 = StubResponseGate()
+        state.setHandler { request in
+            if request.url?.path.hasSuffix("/auth/refresh") == true {
+                return .init(error: URLError(.networkConnectionLost))
+            }
+            if request.url?.path.hasSuffix("/quick-tips") == true {
+                return .init(status: 401, body: json(
+                    #"{"error":{"code":"UNAUTHENTICATED","message":"Expired."}}"#),
+                    gate: delayed401)
+            }
+            return rejection()
+        }
+        let secure = InMemorySecureStore()
+        try secure.save("original", for: "refresh")
+        let expired = LockedFlag()
+        let (client, tokens) = makeClient(state: state, store: secure) { expired.set() }
+        let delayed = Task { () -> APIError? in
+            do { _ = try await client.listQuickTips(); return nil }
+            catch { return error as? APIError }
+        }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while state.count(path: "/quick-tips") == 0, ContinuousClock.now < deadline { await Task.yield() }
+        #expect(state.count(path: "/quick-tips") == 1)
+        // Await the second call all the way through failed refresh and flight
+        // cleanup before releasing the first call's original 401 response.
+        do {
+            _ = try await client.me()
+            Issue.record("expected the shared transport error")
+        } catch let error as APIError {
+            #expect(error.is(.network))
+            #expect(error.status == 0)
+        }
+        #expect(state.count(path: "/auth/refresh") == 1)
+        await delayed401.open()
+        let error = await delayed.value
+        #expect(error?.is(.network) == true)
+        #expect(error?.status == 0)
+        #expect(state.count(path: "/auth/refresh") == 1)
+        #expect(state.count(path: "/me") == 1)
+        #expect(state.count(path: "/quick-tips") == 1)
+        #expect(await tokens.refreshToken == "original")
+        #expect(!expired.value)
+    }
+}
