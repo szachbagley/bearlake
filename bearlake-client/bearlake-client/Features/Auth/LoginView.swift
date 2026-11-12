@@ -69,7 +69,7 @@ struct LoginView: View {
 
                 Section {
                     Text("Accounts are set up by a family admin. "
-                         + "If you need an account or a new password, ask Zach or Rachel.")
+                         + "If you need an account or a new password, ask Brad.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
