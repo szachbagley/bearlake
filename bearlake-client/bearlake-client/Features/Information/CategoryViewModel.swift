@@ -36,6 +36,7 @@ final class CategoryViewModel {
 
     func load() async {
         guard isLoading == false else { return }
+        let generation = cache?.generation
         isLoading = true
         defer { isLoading = false; hasLoadedOnce = true }
         do {
@@ -43,11 +44,20 @@ final class CategoryViewModel {
             // articles only; admins receive both. Filtering here would imply
             // drafts reach a member's device, which they do not.
             let fetched = try await api.listArticles(categoryID: category.id)
+            guard cache?.generation == generation else { articles = []; newlyCreatedArticleID = nil; isOffline = false; return }
             articles = fetched
             errorMessage = nil
             isOffline = false
             cache?.save(articleSummaries: fetched, categoryID: category.id)
         } catch {
+            guard cache?.generation == generation else { articles = []; newlyCreatedArticleID = nil; isOffline = false; return }
+            if CacheFallback.invalidatesContent(error) {
+                cache?.clear()
+                articles = []; newlyCreatedArticleID = nil
+                isOffline = false
+                errorMessage = CacheFallback.message(error, "Access to this content is unavailable.")
+                return
+            }
             switch CacheFallback.forList(
                 error, cached: cache?.articleSummaries(categoryID: category.id) ?? [],
                 fallback: "Couldn't load these articles."
@@ -57,6 +67,7 @@ final class CategoryViewModel {
                 isOffline = true
                 errorMessage = nil
             case .failed(let message):
+                articles = []
                 isOffline = false
                 errorMessage = message
             }

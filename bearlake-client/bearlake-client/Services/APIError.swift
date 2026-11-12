@@ -61,7 +61,18 @@ struct APIError: Error, Equatable, Sendable {
         default:
             message = "Can't reach Bear Lake. Check your connection and try again."
         }
-        return APIError(status: 0, code: KnownErrorCode.network.rawValue, message: message)
+        let connectivity: Bool
+        switch underlying.code {
+        case .timedOut, .notConnectedToInternet, .networkConnectionLost,
+             .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed,
+             .internationalRoamingOff, .dataNotAllowed:
+            connectivity = true
+        default:
+            connectivity = false
+        }
+        return APIError(status: 0,
+                        code: connectivity ? KnownErrorCode.network.rawValue : KnownErrorCode.internalError.rawValue,
+                        message: message)
     }
 
     /// A response that carried no usable `{error:{code,message}}` body.

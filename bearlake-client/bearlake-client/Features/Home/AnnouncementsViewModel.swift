@@ -38,6 +38,7 @@ final class AnnouncementsViewModel {
     /// refresh after a delete cannot leave a phantom row behind.
     func load() async {
         guard isLoading == false else { return }
+        let generation = cache?.generation
         isLoading = true
         defer { isLoading = false; hasLoadedOnce = true }
 
@@ -45,12 +46,21 @@ final class AnnouncementsViewModel {
             let page = try await api.listAnnouncements(
                 limit: Limits.announcementListLimitDefault, cursor: nil
             )
+            guard cache?.generation == generation else { announcements = []; nextCursor = nil; isOffline = false; return }
             announcements = page.items
             nextCursor = page.nextCursor
             errorMessage = nil
             isOffline = false
             cache?.save(announcements: page.items, replacingAll: true)
         } catch {
+            guard cache?.generation == generation else { announcements = []; nextCursor = nil; isOffline = false; return }
+            if CacheFallback.invalidatesContent(error) {
+                cache?.clear()
+                announcements = []; nextCursor = nil
+                isOffline = false
+                errorMessage = CacheFallback.message(error, "Access to this content is unavailable.")
+                return
+            }
             switch CacheFallback.forList(
                 error, cached: cache?.announcements() ?? [],
                 fallback: "Couldn't load announcements."
@@ -63,6 +73,7 @@ final class AnnouncementsViewModel {
                 isOffline = true
                 errorMessage = nil
             case .failed(let message):
+                announcements = []; nextCursor = nil
                 isOffline = false
                 errorMessage = message
             }
@@ -77,6 +88,7 @@ final class AnnouncementsViewModel {
     /// which would crash a `ForEach` keyed on `id`, not merely look wrong.
     func loadMore() async {
         guard let cursor = nextCursor, isLoadingMore == false, isLoading == false else { return }
+        let generation = cache?.generation
         isLoadingMore = true
         defer { isLoadingMore = false }
 
@@ -84,11 +96,19 @@ final class AnnouncementsViewModel {
             let page = try await api.listAnnouncements(
                 limit: Limits.announcementListLimitDefault, cursor: cursor
             )
+            guard cache?.generation == generation else { announcements = []; nextCursor = nil; return }
             let known = Set(announcements.map(\.id))
             announcements.append(contentsOf: page.items.filter { known.contains($0.id) == false })
             nextCursor = page.nextCursor
             errorMessage = nil
         } catch let error as APIError {
+            guard cache?.generation == generation else { announcements = []; nextCursor = nil; return }
+            if CacheFallback.invalidatesContent(error) {
+                cache?.clear()
+                announcements = []
+                nextCursor = nil
+                isOffline = false
+            }
             errorMessage = error.message
         } catch {
             errorMessage = "Couldn't load more announcements."

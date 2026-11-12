@@ -2,19 +2,8 @@
 //  CacheFallback.swift
 //  bearlake-client
 //
-//  Phase 10, step 3. The C46 decision, written once.
-//
-//  When a fetch fails there are exactly two outcomes, and which one applies
-//  depends only on whether the cache has anything to show:
-//
-//    - something cached  → render it read-only behind an offline banner
-//    - nothing cached    → surface an actionable error (never an empty list,
-//                          which reads as "there is nothing here")
-//
-//  Six ViewModels make this call. Restating it in each is how the halves
-//  drift apart — one of them ends up showing a blank screen instead of an
-//  error, and nobody notices until the network is actually down.
-//
+// Cached content is available only for an explicitly eligible connection failure.
+// The server remains authoritative about access and resource existence.
 
 import Foundation
 
@@ -33,15 +22,36 @@ enum CacheFallback {
     static func forList<C: Collection>(
         _ error: Error, cached: C, fallback: String
     ) -> Outcome<C> {
-        cached.isEmpty ? .failed(message(error, fallback)) : .cached(cached)
+        isEligible(error) && !cached.isEmpty ? .cached(cached) : .failed(message(error, fallback))
     }
 
     /// For single-item endpoints, where absence is unambiguous.
     static func forItem<Value>(
         _ error: Error, cached: Value?, fallback: String
     ) -> Outcome<Value> {
-        if let cached { return .cached(cached) }
+        if isEligible(error), let cached { return .cached(cached) }
         return .failed(message(error, fallback))
+    }
+
+    static func isEligible(_ error: Error) -> Bool {
+        if let error = error as? APIError {
+            return error.status == 0 && error.is(.network)
+        }
+        guard let error = error as? URLError else { return false }
+        switch error.code {
+        case .notConnectedToInternet, .networkConnectionLost, .timedOut,
+             .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed,
+             .internationalRoamingOff, .dataNotAllowed:
+            return true
+        default:
+            return false
+        }
+    }
+
+    static func invalidatesContent(_ error: Error) -> Bool {
+        guard let error = error as? APIError else { return false }
+        return [401, 403, 404].contains(error.status)
+            || error.is(.passwordChangeRequired) || error.is(.accountDisabled)
     }
 
     /// The server's message when there is one — it is written to be shown

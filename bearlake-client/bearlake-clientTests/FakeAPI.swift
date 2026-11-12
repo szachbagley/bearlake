@@ -23,6 +23,17 @@ actor FakeAPI: BearLakeAPI {
     var categories: [InfoCategory] = []
     var articleSummaries: [String: [ArticleSummary]] = [:]
     var articles: [String: InfoArticle] = [:]
+    private var articleLoadGate: CheckedContinuation<Void, Never>?
+    private var shouldSuspendArticle = false
+    func suspendNextArticleLoad() { shouldSuspendArticle = true }
+    var isArticleLoadSuspended: Bool { articleLoadGate != nil }
+    func resumeArticleLoad() { articleLoadGate?.resume(); articleLoadGate = nil }
+
+    private var logoutGate: CheckedContinuation<Void, Never>?
+    private var shouldSuspendLogout = false
+    func suspendNextLogout() { shouldSuspendLogout = true }
+    var isLogoutSuspended: Bool { logoutGate != nil }
+    func resumeLogout() { logoutGate?.resume(); logoutGate = nil }
 
     /// When set, the next call to any method throws this instead.
     var nextError: APIError?
@@ -71,7 +82,13 @@ actor FakeAPI: BearLakeAPI {
         return SessionResult(accessToken: "access", refreshToken: "refresh", user: user)
     }
 
-    func logout() async throws { try record("logout") }
+    func logout() async throws {
+        try record("logout")
+        if shouldSuspendLogout {
+            shouldSuspendLogout = false
+            await withCheckedContinuation { logoutGate = $0 }
+        }
+    }
 
     func changePassword(currentPassword: String, newPassword: String) async throws -> SessionResult {
         try record("changePassword")
@@ -221,6 +238,10 @@ actor FakeAPI: BearLakeAPI {
 
     func getArticle(id: String) async throws -> InfoArticle {
         try record("getArticle")
+        if shouldSuspendArticle {
+            shouldSuspendArticle = false
+            await withCheckedContinuation { articleLoadGate = $0 }
+        }
         guard let found = articles[id] else { throw APIError.notFound }
         return found
     }

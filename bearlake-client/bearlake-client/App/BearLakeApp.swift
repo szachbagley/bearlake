@@ -51,6 +51,9 @@ final class AppComposition {
             },
             onPasswordChangeRequired: { [holder] in
                 await holder.value?.requirePasswordChange()
+            },
+            onSessionUpdated: { [holder] user in
+                await holder.value?.sessionUpdated(user)
             }
         )
 
@@ -92,6 +95,7 @@ struct RootView: View {
             ChangePasswordView(auth: auth, mode: .forced)
         case .signedIn:
             RootTabView(auth: auth, api: api, cache: cache)
+                .id(auth.sessionGeneration)
         }
     }
 }

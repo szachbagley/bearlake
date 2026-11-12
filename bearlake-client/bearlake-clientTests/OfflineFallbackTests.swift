@@ -60,8 +60,8 @@ struct HomeOfflineTests {
         #expect(model.isOffline)
         #expect(model.announcements.map(\.id) == ["a1"])
         #expect(
-            model.errorMessage == nil,
-            "the banner already says it; an alert would be the same news twice"
+            model.errorMessage != nil,
+            "the calendar has no cached data, so its failure remains actionable"
         )
     }
 
@@ -443,5 +443,109 @@ struct EmptyStateHonestyTests {
 
         #expect(model.errorMessage == nil)
         #expect(model.isEmpty, "genuinely empty, and knowably so")
+    }
+}
+
+
+@MainActor
+struct AuthorizationFallbackTests {
+    nonisolated static let rejected = [
+        APIError(status: 401, code: "UNAUTHENTICATED", message: "Sign in again."),
+        APIError(status: 403, code: "FORBIDDEN", message: "Access denied."),
+        APIError(status: 403, code: "PASSWORD_CHANGE_REQUIRED", message: "Change your password."),
+        APIError(status: 404, code: "NOT_FOUND", message: "No longer available."),
+    ]
+
+    @Test("server rejection removes displayed and cached article content", arguments: rejected)
+    func rejectedArticle(_ rejection: APIError) async throws {
+        let store = try makeStore()
+        let api = FakeAPI()
+        await api.setArticle(.fixture(id: "private", blocks: [.paragraph(id: "b1", text: "Private draft")]))
+        let model = ArticleViewModel(articleID: "private", initialTitle: "Article", api: api, cache: store)
+        await model.load()
+        #expect(model.article != nil)
+        await api.setAlwaysFails(rejection)
+        await model.load()
+        #expect(model.article == nil)
+        #expect(model.blocks.isEmpty)
+        #expect(!model.isOffline)
+        #expect(model.errorMessage == rejection.message)
+        #expect(store.isEmpty)
+        await api.setAlwaysFails(offline)
+        await model.load()
+        #expect(model.article == nil, "a later network failure cannot resurrect rejected content")
+    }
+
+    @Test("server rejection removes displayed and cached category summaries", arguments: rejected)
+    func rejectedCategory(_ rejection: APIError) async throws {
+        let store = try makeStore()
+        let api = FakeAPI()
+        await api.setArticleSummaries("c1", [.fixture(id: "private", categoryId: "c1")])
+        let model = CategoryViewModel(category: .fixture(id: "c1"), api: api, cache: store)
+        await model.load()
+        #expect(!model.articles.isEmpty)
+        await api.setAlwaysFails(rejection)
+        await model.load()
+        #expect(model.articles.isEmpty)
+        #expect(!model.isOffline)
+        #expect(model.errorMessage == rejection.message)
+        #expect(store.isEmpty)
+    }
+
+    @Test("late old-session article response cannot repopulate views or cache")
+    func delayedArticle() async throws {
+        let store = try makeStore()
+        let api = FakeAPI()
+        await api.setArticle(.fixture(id: "private"))
+        await api.suspendNextArticleLoad()
+        let model = ArticleViewModel(articleID: "private", initialTitle: "Article", api: api, cache: store)
+        let load = Task { await model.load() }
+        while !(await api.isArticleLoadSuspended) { await Task.yield() }
+        store.clear()
+        await api.resumeArticleLoad()
+        await load.value
+        #expect(model.article == nil)
+        #expect(store.isEmpty)
+    }
+
+    @Test("only known connection failures qualify for offline fallback")
+    func explicitConnectionFailuresOnly() {
+        #expect(CacheFallback.isEligible(offline))
+        #expect(CacheFallback.isEligible(URLError(.notConnectedToInternet)))
+        #expect(CacheFallback.isEligible(URLError(.timedOut)))
+        #expect(!CacheFallback.isEligible(URLError(.cancelled)))
+        #expect(!CacheFallback.isEligible(URLError(.serverCertificateUntrusted)))
+        #expect(!CacheFallback.isEligible(CancellationError()))
+        #expect(!CacheFallback.isEligible(APIError(status: 500, code: "NETWORK_ERROR", message: "Server failed.")))
+        #expect(!CacheFallback.isEligible(APIError.unparsable(status: 200)))
+    }
+}
+
+
+@MainActor
+struct OfflineAccountSwitchTests {
+    @Test("member login after offline restore cannot read the previous admin cache")
+    func memberCannotInheritAdminContent() async throws {
+        let cache = try makeStore()
+        cache.save(article: .fixture(id: "private-draft", status: .draft))
+        let api = FakeAPI()
+        await api.setAlwaysFails(offline)
+        let tokens = TokenStore(secureStore: InMemorySecureStore(), key: "switch")
+        try await tokens.store(SessionResult(accessToken: "old", refreshToken: "old-refresh",
+                                            user: .fixture(id: "admin", role: .admin)))
+        let auth = AuthViewModel(api: api, tokens: tokens) { cache.clear() }
+        await auth.restore()
+        #expect(auth.state == .signedOut)
+        #expect(cache.article(id: "private-draft") != nil)
+        await api.setAlwaysFails(nil)
+        await api.seed(user: .fixture(id: "member", role: .member))
+        await auth.login(email: "member@example.com", password: "password1234")
+        #expect(cache.isEmpty)
+        await api.setAlwaysFails(offline)
+        let article = ArticleViewModel(articleID: "private-draft", initialTitle: "Article", api: api, cache: cache)
+        await article.load()
+        #expect(article.article == nil)
+        #expect(article.isOffline == false)
+        #expect(article.errorMessage != nil)
     }
 }

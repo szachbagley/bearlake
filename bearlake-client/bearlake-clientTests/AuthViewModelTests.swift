@@ -281,3 +281,53 @@ struct SessionGateTests {
         #expect(auth.state == .signedOut)
     }
 }
+
+
+@MainActor
+struct SessionContentBoundaryTests {
+    @Test("identity and known role changes invalidate content before publishing session")
+    func boundaries() async {
+        let api = FakeAPI()
+        let tokens = TokenStore(secureStore: InMemorySecureStore(), key: "boundary")
+        var invalidations = 0
+        let auth = AuthViewModel(api: api, tokens: tokens) { invalidations += 1 }
+        await api.seed(user: .fixture(id: "admin", role: .admin))
+        await auth.login(email: "admin@example.com", password: "password1234")
+        let first = auth.sessionGeneration
+        #expect(invalidations == 1)
+        await api.seed(user: .fixture(id: "admin", role: .member))
+        await auth.login(email: "admin@example.com", password: "password1234")
+        #expect(invalidations == 2)
+        #expect(auth.sessionGeneration != first)
+        auth.requirePasswordChange()
+        #expect(invalidations == 3)
+        auth.sessionExpired()
+        #expect(invalidations == 4)
+        #expect(auth.state == .signedOut)
+    }
+}
+
+
+@MainActor
+struct LogoutLoginOrderingTests {
+    @Test("a new login waits until an outstanding logout finishes clearing credentials")
+    func cannotLoginDuringLogout() async {
+        let (auth, api, _, _) = makeAuth()
+        await auth.login(email: "first@example.com", password: "password1234")
+        await api.suspendNextLogout()
+        let logout = Task { await auth.logout() }
+        while !(await api.isLogoutSuspended) { await Task.yield() }
+        #expect(auth.state == .signedOut)
+        #expect(auth.isWorking)
+        let callsBefore = await api.callCount("login")
+        await auth.login(email: "next@example.com", password: "password1234")
+        #expect(await api.callCount("login") == callsBefore)
+        #expect(auth.state == .signedOut)
+        await api.resumeLogout()
+        await logout.value
+        #expect(!auth.isWorking)
+        await auth.login(email: "next@example.com", password: "password1234")
+        #expect(await api.callCount("login") == callsBefore + 1)
+        #expect(auth.currentUser != nil)
+    }
+}
